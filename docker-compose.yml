@@ -1,3 +1,5 @@
+name: ach-bill-pay-simulator
+
 services:
   postgres:
     image: postgres:16-alpine

@@ -1,4 +1,4 @@
-# Mock ACH Bill Pay
+# ACH Bill Pay Simulator
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
@@ -20,7 +20,7 @@ operator, a biller, or any real financial account.
 |---|---|
 | Web UI | `http://127.0.0.1:3500` |
 | Bill-pay API | `http://127.0.0.1:8501` |
-| Mock provider API | `http://127.0.0.1:8502` |
+| Simulated provider API | `http://127.0.0.1:8502` |
 | PostgreSQL | `localhost:5432` |
 | Redis | `localhost:6379` |
 
@@ -71,7 +71,7 @@ source .venv/bin/activate
 make dev-provider
 ```
 
-Mock provider API health check:
+Simulated provider API health check:
 
 ```bash
 curl http://127.0.0.1:8502/healthz
@@ -121,7 +121,7 @@ make port-check
 ```text
 apps/
   billpay_api/      FastAPI shell for the bill-pay application
-  mock_provider/    FastAPI shell for the mock ACH provider
+  mock_provider/    FastAPI shell for the simulated ACH provider
   web/              React + TypeScript + Vite shell
 packages/
   provider_contract/

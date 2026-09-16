@@ -1,5 +1,5 @@
 {
-  "name": "ach-mock-bill-pay-web",
+  "name": "ach-bill-pay-simulator-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",

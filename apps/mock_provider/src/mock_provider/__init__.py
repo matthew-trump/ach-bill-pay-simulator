@@ -1,1 +1,1 @@
-"""Mock ACH provider service package."""
+"""Simulated ACH provider service package."""

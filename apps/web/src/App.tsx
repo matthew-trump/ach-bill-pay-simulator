@@ -12,7 +12,7 @@ export function App() {
 
       <section className="intro">
         <p className="eyebrow">Milestone 0</p>
-        <h1>Mock ACH Bill Pay</h1>
+        <h1>ACH Bill Pay Simulator</h1>
         <p>
           Local-only foundation for a simulated ACH-like bill-pay system. Payment flows, account
           tokenization, webhooks, ledgers, and reconciliation are intentionally deferred.
@@ -26,7 +26,7 @@ export function App() {
           <a href={`${billpayApiUrl}/healthz`}>{billpayApiUrl}/healthz</a>
         </article>
         <article>
-          <h2>Mock provider API</h2>
+          <h2>Simulated provider API</h2>
           <p>Health endpoint</p>
           <a href={`${mockProviderApiUrl}/healthz`}>{mockProviderApiUrl}/healthz</a>
         </article>

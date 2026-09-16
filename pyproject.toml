@@ -3,9 +3,9 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ach-mock-bill-pay"
+name = "ach-bill-pay-simulator"
 version = "0.1.0"
-description = "Local-only mock ACH bill-pay educational system"
+description = "Local-only ACH bill-pay simulator for educational use"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",

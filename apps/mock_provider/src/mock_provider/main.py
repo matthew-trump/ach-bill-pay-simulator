@@ -2,7 +2,7 @@ from fastapi import FastAPI
 
 from mock_provider.settings import settings
 
-app = FastAPI(title="Mock ACH Provider API", version="0.1.0")
+app = FastAPI(title="Simulated ACH Provider API", version="0.1.0")
 
 
 @app.get("/healthz")

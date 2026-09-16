@@ -1,4 +1,4 @@
-# Mock ACH Bill-Pay MVP
+# ACH Bill Pay Simulator MVP
 
 ## Project brief for a local Codex build
 
@@ -97,14 +97,14 @@ Avoid port 8080. Suggested local ports:
 |---|---:|
 | Web UI | 3000 |
 | Bill-pay API | 8001 |
-| Mock provider API | 8002 |
+| Simulated provider API | 8002 |
 | PostgreSQL | 5432 |
 | Redis | 6379 |
 
 ## 5. Repository layout
 
 ```text
-mock-ach-bill-pay/
+ach-bill-pay-simulator/
 ├── AGENTS.md
 ├── README.md
 ├── docker-compose.yml
@@ -165,7 +165,7 @@ The customer-facing application owns:
 
 It communicates with the provider only through HTTP and webhooks.
 
-### 6.2 Mock ACH provider
+### 6.2 Simulated ACH provider
 
 The provider simulator owns:
 
@@ -285,7 +285,7 @@ class AchProvider(Protocol):
 
 Implement `MockAchProviderClient` as the HTTP adapter. Domain services should not import mock-provider database models or HTTP response schemas directly.
 
-## 9. Mock-provider API
+## 9. Simulated-provider API
 
 All endpoints live under `/v1`. Use bearer authentication with a fixed development-only API key loaded from the environment.
 
@@ -816,7 +816,7 @@ Acceptance criteria:
 - Lint and empty test suites pass.
 - No service uses port 8080.
 
-### Milestone 1: Mock-provider core
+### Milestone 1: Simulated-provider core
 
 - Implement provider customers and fictional bank accounts.
 - Implement opaque tokens.

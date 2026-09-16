@@ -11,11 +11,12 @@ export function App() {
       </div>
 
       <section className="intro">
-        <p className="eyebrow">Milestone 0</p>
+        <p className="eyebrow">Milestone 5</p>
         <h1>ACH Bill Pay Simulator</h1>
         <p>
-          Local-only foundation for a simulated ACH-like bill-pay system. Payment flows, account
-          tokenization, webhooks, ledgers, and reconciliation are intentionally deferred.
+          Local-only simulated ACH-like bill-pay system with provider transfers, webhooks, two-leg
+          orchestration, and an internal double-entry ledger. Reconciliation and browser workflows
+          are intentionally deferred.
         </p>
       </section>
 

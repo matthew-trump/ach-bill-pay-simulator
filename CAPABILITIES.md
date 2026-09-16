@@ -164,3 +164,43 @@ Milestone 4 adds two-leg bill-pay orchestration.
 
   In short: a bill payment now has separate funding and delivery transfers, and
   the app reaches explicit states for the principal success and failure paths.
+
+== Milestone 5 ==
+
+Milestone 5 adds a minimal immutable double-entry ledger.
+
+  New capabilities:
+
+  - Seed ledger accounts:
+      - Platform settlement cash
+      - Customer bill-payment liability
+      - Biller settlement payable
+      - Provider clearing
+      - Fees revenue
+      - Payment loss/receivable
+  - Post balanced ledger transactions when funding succeeds:
+      - debit Platform settlement cash
+      - credit Customer bill-payment liability
+  - Post balanced ledger transactions when delivery succeeds:
+      - debit Customer bill-payment liability
+      - credit Platform settlement cash
+  - Store ledger amounts as integer cents.
+  - Prevent duplicate ledger posting for retried success events by using a
+    unique source key per payment leg outcome.
+  - Return ledger transactions and entries with payment-order detail:
+      - GET /v1/payment-orders/{payment_order_id}
+  - Inspect ledger account balances:
+      - GET /v1/ledger/accounts
+  - Check ledger balancing invariants:
+      - GET /v1/ledger/invariants
+
+  Still not included:
+
+  - no automatic webhook receiver/signature verification on bill-pay side yet
+  - no reconciliation
+  - frontend still does not expose workflows
+  - no ledger correction/reversal workflow beyond the immutable data model
+
+  In short: bill-pay application state is now accompanied by separate ledger
+  truth, and successful funding/delivery events produce balanced, explainable,
+  idempotent ledger entries.

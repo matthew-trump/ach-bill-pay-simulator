@@ -23,6 +23,23 @@ class PaymentLegResponse(BaseModel):
     return_code: str | None = None
 
 
+class LedgerEntryResponse(BaseModel):
+    id: str
+    ledger_account_id: str
+    debit_cents: int
+    credit_cents: int
+
+
+class LedgerTransactionResponse(BaseModel):
+    id: str
+    payment_order_id: str
+    transaction_type: str
+    description: str
+    source_type: str
+    source_id: str
+    entries: list[LedgerEntryResponse]
+
+
 class PaymentOrderResponse(BaseModel):
     id: str
     user_id: str
@@ -32,6 +49,7 @@ class PaymentOrderResponse(BaseModel):
     status: str
     idempotency_key: str
     legs: list[PaymentLegResponse]
+    ledger_transactions: list[LedgerTransactionResponse]
 
 
 class ProviderEventIngestResponse(BaseModel):
@@ -39,3 +57,18 @@ class ProviderEventIngestResponse(BaseModel):
     duplicate: bool
     processed: bool
     payment_leg_id: str | None = None
+
+
+class LedgerAccountBalanceResponse(BaseModel):
+    id: str
+    name: str
+    account_type: str
+    normal_balance: str
+    debit_cents: int
+    credit_cents: int
+    balance_cents: int
+
+
+class LedgerInvariantResponse(BaseModel):
+    balanced: bool
+    unbalanced_transaction_ids: list[str]

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from billpay_api.persistence.models import BankAccount, Bill, Biller, BillerAccount, User
 from billpay_api.schemas import SeedResponse
+from billpay_api.services.ledger import ensure_ledger_accounts
 
 SEEDED_USER_ID = "user_alice_example"
 SEEDED_FUNDING_ACCOUNT_ID = "ba_ref_alice_checking"
@@ -13,6 +14,7 @@ SEEDED_BILL_ID = "bill_desert_electric_001"
 
 
 def ensure_seed_data(session: Session) -> SeedResponse:
+    ensure_ledger_accounts(session)
     if session.get(User, SEEDED_USER_ID) is None:
         session.add(
             User(

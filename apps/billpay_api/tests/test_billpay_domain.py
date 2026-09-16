@@ -127,6 +127,43 @@ def test_successful_funding_starts_one_delivery_leg_without_duplicate_effects(
         assert provider.calls[1].metadata["leg"] == "delivery"
 
 
+def test_funding_success_posts_balanced_ledger_once_for_retried_events(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-ledger-funding")
+        funding_transfer_id = order["legs"][0]["provider_transfer_id"]
+
+        first = client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_ledger_funding_first",
+                transfer_id=funding_transfer_id,
+                status="succeeded",
+                leg="funding",
+            ),
+        )
+        retried_with_new_event_id = client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_ledger_funding_retry_new_id",
+                transfer_id=funding_transfer_id,
+                status="succeeded",
+                leg="funding",
+            ),
+        )
+        payment = client.get(f"/v1/payment-orders/{order['id']}").json()
+
+        assert first.status_code == 200
+        assert retried_with_new_event_id.status_code == 200
+        assert len(payment["ledger_transactions"]) == 1
+        transaction = payment["ledger_transactions"][0]
+        assert transaction["transaction_type"] == "funding_succeeded"
+        assert sum(entry["debit_cents"] for entry in transaction["entries"]) == 14267
+        assert sum(entry["credit_cents"] for entry in transaction["entries"]) == 14267
+        assert len(provider.calls) == 2
+
+
 def test_delivery_success_marks_payment_delivered(tmp_path: Path) -> None:
     provider = FakeAchProvider()
     with billpay_client(tmp_path, provider) as client:
@@ -156,6 +193,52 @@ def test_delivery_success_marks_payment_delivered(tmp_path: Path) -> None:
         assert response.status_code == 200
         assert final_order["status"] == "delivered"
         assert final_order["legs"][1]["status"] == "succeeded"
+
+
+def test_delivery_success_posts_second_balanced_ledger_transaction(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-ledger-delivery")
+        client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_ledger_delivery_funding",
+                transfer_id=order["legs"][0]["provider_transfer_id"],
+                status="succeeded",
+                leg="funding",
+            ),
+        )
+        order_with_delivery = client.get(f"/v1/payment-orders/{order['id']}").json()
+        client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_ledger_delivery_success",
+                transfer_id=order_with_delivery["legs"][1]["provider_transfer_id"],
+                status="succeeded",
+                leg="delivery",
+            ),
+        )
+
+        final_order = client.get(f"/v1/payment-orders/{order['id']}").json()
+        invariants = client.get("/v1/ledger/invariants").json()
+        accounts = {
+            account["id"]: account for account in client.get("/v1/ledger/accounts").json()
+        }
+
+        assert final_order["status"] == "delivered"
+        assert [tx["transaction_type"] for tx in final_order["ledger_transactions"]] == [
+            "funding_succeeded",
+            "delivery_succeeded",
+        ]
+        for transaction in final_order["ledger_transactions"]:
+            assert len(transaction["entries"]) == 2
+            assert sum(entry["debit_cents"] for entry in transaction["entries"]) == sum(
+                entry["credit_cents"] for entry in transaction["entries"]
+            )
+        assert invariants == {"balanced": True, "unbalanced_transaction_ids": []}
+        assert accounts["ledger_platform_settlement_cash"]["balance_cents"] == 0
+        assert accounts["ledger_customer_bill_payment_liability"]["balance_cents"] == 0
 
 
 def test_funding_failure_before_delivery_marks_payment_failed(tmp_path: Path) -> None:

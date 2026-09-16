@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from billpay_api.persistence.database import Base
@@ -135,3 +135,47 @@ class ProviderEventInbox(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processing_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class LedgerAccount(Base):
+    __tablename__ = "billpay_ledger_accounts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    account_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    normal_balance: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LedgerTransaction(Base):
+    __tablename__ = "billpay_ledger_transactions"
+    __table_args__ = (UniqueConstraint("source_type", "source_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    payment_order_id: Mapped[str] = mapped_column(
+        ForeignKey("billpay_payment_orders.id"), nullable=False
+    )
+    transaction_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str] = mapped_column(String(300), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LedgerEntry(Base):
+    __tablename__ = "billpay_ledger_entries"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ledger_transaction_id: Mapped[str] = mapped_column(
+        ForeignKey("billpay_ledger_transactions.id"), nullable=False
+    )
+    ledger_account_id: Mapped[str] = mapped_column(
+        ForeignKey("billpay_ledger_accounts.id"), nullable=False
+    )
+    payment_order_id: Mapped[str] = mapped_column(
+        ForeignKey("billpay_payment_orders.id"), nullable=False
+    )
+    debit_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    credit_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

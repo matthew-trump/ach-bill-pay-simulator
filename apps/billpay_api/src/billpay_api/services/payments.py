@@ -19,10 +19,18 @@ from billpay_api.persistence.models import (
 )
 from billpay_api.providers.types import AchProvider
 from billpay_api.schemas import (
+    LedgerEntryResponse,
+    LedgerTransactionResponse,
     PaymentLegResponse,
     PaymentOrderCreate,
     PaymentOrderResponse,
     ProviderEventIngestResponse,
+)
+from billpay_api.services.ledger import (
+    ledger_entries_for_transaction,
+    ledger_transactions_for_payment,
+    post_delivery_succeeded,
+    post_funding_succeeded,
 )
 from billpay_api.settings import settings
 
@@ -163,6 +171,7 @@ def payment_order_response(session: Session, order: PaymentOrder) -> PaymentOrde
         select(PaymentLeg).where(PaymentLeg.payment_order_id == order.id)
     ).all()
     ordered_legs = sorted(legs, key=lambda leg: (0 if leg.leg_type == "funding" else 1, leg.id))
+    ledger_transactions = ledger_transactions_for_payment(session, order.id)
     return PaymentOrderResponse(
         id=order.id,
         user_id=order.user_id,
@@ -181,6 +190,26 @@ def payment_order_response(session: Session, order: PaymentOrder) -> PaymentOrde
             )
             for leg in ordered_legs
         ],
+        ledger_transactions=[
+            LedgerTransactionResponse(
+                id=transaction.id,
+                payment_order_id=transaction.payment_order_id,
+                transaction_type=transaction.transaction_type,
+                description=transaction.description,
+                source_type=transaction.source_type,
+                source_id=transaction.source_id,
+                entries=[
+                    LedgerEntryResponse(
+                        id=entry.id,
+                        ledger_account_id=entry.ledger_account_id,
+                        debit_cents=entry.debit_cents,
+                        credit_cents=entry.credit_cents,
+                    )
+                    for entry in ledger_entries_for_transaction(session, transaction.id)
+                ],
+            )
+            for transaction in ledger_transactions
+        ],
     )
 
 
@@ -194,13 +223,19 @@ async def _update_order_for_leg_event(
     if order is None:
         return
     if leg.leg_type == "delivery":
-        _update_order_for_delivery_event(order, leg)
+        _update_order_for_delivery_event(session=session, order=order, leg=leg)
         return
     if leg.leg_type != "funding":
         return
 
     delivery_leg = _delivery_leg_for_order(session, order.id)
     if leg.status == "succeeded":
+        post_funding_succeeded(
+            session=session,
+            payment_order_id=order.id,
+            payment_leg_id=leg.id,
+            amount=leg.amount,
+        )
         if delivery_leg is None:
             order.status = "funded"
             await _create_delivery_leg(
@@ -210,7 +245,7 @@ async def _update_order_for_leg_event(
                 funding_leg=leg,
             )
         else:
-            _update_order_for_delivery_event(order, delivery_leg)
+            _update_order_for_delivery_event(session=session, order=order, leg=delivery_leg)
     elif leg.status == "failed":
         order.status = "action_required" if delivery_leg is not None else "failed"
     elif leg.status == "returned":
@@ -260,8 +295,19 @@ async def _create_delivery_leg(
     session.flush()
 
 
-def _update_order_for_delivery_event(order: PaymentOrder, leg: PaymentLeg) -> None:
+def _update_order_for_delivery_event(
+    *,
+    session: Session,
+    order: PaymentOrder,
+    leg: PaymentLeg,
+) -> None:
     if leg.status == "succeeded":
+        post_delivery_succeeded(
+            session=session,
+            payment_order_id=order.id,
+            payment_leg_id=leg.id,
+            amount=leg.amount,
+        )
         order.status = "delivered"
         leg.settled_at = datetime.now(UTC)
     elif leg.status in {"failed", "returned"}:

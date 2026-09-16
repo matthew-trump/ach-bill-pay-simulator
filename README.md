@@ -2,7 +2,7 @@
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
-This repository is currently at **Milestone 4: Two-leg orchestration**. It can
+This repository is currently at **Milestone 5: Ledger**. It can
 create simulated provider customers, tokenize fictional bank accounts, create
 provider transfers, enforce provider idempotency, and move transfers through
 deterministic sandbox states. It can also register webhook endpoints, create
@@ -11,10 +11,11 @@ retry or duplicate deliveries through sandbox controls. The bill-pay API can now
 seed fictional user/biller/bill data, submit a payment order, create exactly one
 funding transfer through the provider abstraction, process provider events into
 an inbox without duplicate effects, and start a separate delivery transfer after
-the funding leg succeeds.
+the funding leg succeeds. It also posts immutable balanced ledger transactions
+for successful funding and delivery events.
 
-It does not move money, connect to real providers, post ledger entries,
-reconcile payments, or expose operational bill-pay workflows in the frontend yet.
+It does not move money, connect to real providers, reconcile payments, or expose
+operational bill-pay workflows in the frontend yet.
 
 ## Safety Boundary
 
@@ -199,18 +200,23 @@ curl -sS -X POST "$BILLPAY/v1/payment-orders" \
   }'
 ```
 
-Milestone 4 bill-pay endpoints:
+Milestone 5 bill-pay endpoints:
 
 - `POST /dev/seed`
 - `POST /v1/payment-orders`
+- `GET /v1/payment-orders/{payment_order_id}`
 - `POST /v1/provider-events`
+- `GET /v1/ledger/accounts`
+- `GET /v1/ledger/invariants`
 
 `POST /v1/provider-events` records provider events in an inbox and updates the
 matching payment leg. A funding success starts exactly one delivery transfer
 from the simulated bill-pay settlement account to the biller account. Reposting
-the same provider event ID is treated as a harmless duplicate.
+the same provider event ID is treated as a harmless duplicate. Successful funding
+and delivery events post balanced ledger transactions once per payment leg
+outcome, even if the provider sends a retried success event.
 
-## Milestone 4 Acceptance
+## Milestone 5 Acceptance
 
 - Both APIs boot on local ports and expose `/healthz`.
 - The frontend boots on port `3500`.
@@ -232,6 +238,12 @@ the same provider event ID is treated as a harmless duplicate.
 - Delivery success marks the payment order `delivered`.
 - Funding failure before delivery marks the payment order `failed`.
 - Delivery failure or a late funding return after delivery marks the payment order `action_required`.
+- Ledger accounts are seeded for settlement cash, customer liability, biller payable, provider clearing, fees revenue, and payment loss/receivable.
+- Funding success posts a balanced debit to platform settlement cash and credit to customer bill-payment liability.
+- Delivery success posts a balanced debit to customer bill-payment liability and credit to platform settlement cash.
+- Retried success events cannot double-post ledger transactions.
+- Payment-order detail responses include ledger transactions and entries.
+- Ledger account balance and invariant endpoints expose current ledger truth.
 - Illegal transfer state transitions return `409`.
 - Lint and tests pass.
 - No service uses port `8080`.

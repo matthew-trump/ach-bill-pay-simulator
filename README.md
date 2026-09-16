@@ -2,15 +2,19 @@
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
-This repository is currently at **Milestone 2: Provider webhooks**. It can
+This repository is currently at **Milestone 3: Bill-pay domain**. It can
 create simulated provider customers, tokenize fictional bank accounts, create
 provider transfers, enforce provider idempotency, and move transfers through
 deterministic sandbox states. It can also register webhook endpoints, create
 immutable transfer events, sign webhook delivery attempts, record responses, and
-retry or duplicate deliveries through sandbox controls.
+retry or duplicate deliveries through sandbox controls. The bill-pay API can now
+seed fictional user/biller/bill data, submit a payment order, create exactly one
+funding transfer through the provider abstraction, and process provider events
+into an inbox without duplicate effects.
 
 It does not move money, connect to real providers, post ledger entries,
-orchestrate bill payments, or reconcile payments yet.
+start delivery legs, orchestrate completed bill payments, or reconcile payments
+yet.
 
 ## Safety Boundary
 
@@ -168,7 +172,44 @@ X-Mock-Webhook-Timestamp
 X-Mock-Webhook-Signature
 ```
 
-## Milestone 2 Acceptance
+## Bill-Pay API Smoke Test
+
+Seed fictional bill-pay data:
+
+```bash
+export BILLPAY=http://127.0.0.1:8501
+export PROVIDER=http://127.0.0.1:8502
+
+curl -sS -X POST "$PROVIDER/_sandbox/seed-billpay-accounts"
+curl -sS -X POST "$BILLPAY/dev/seed"
+```
+
+Submit a payment order using the returned `user_id`, `bill_id`, and
+`funding_account_id`:
+
+```bash
+curl -sS -X POST "$BILLPAY/v1/payment-orders" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_alice_example",
+    "bill_id": "bill_desert_electric_001",
+    "funding_account_id": "ba_ref_alice_checking",
+    "idempotency_key": "demo-payment-001",
+    "authorization_text": "I authorize this simulated ACH debit."
+  }'
+```
+
+Milestone 3 bill-pay endpoints:
+
+- `POST /dev/seed`
+- `POST /v1/payment-orders`
+- `POST /v1/provider-events`
+
+`POST /v1/provider-events` records provider events in an inbox and updates the
+funding leg. Reposting the same provider event ID is treated as a harmless
+duplicate.
+
+## Milestone 3 Acceptance
 
 - Both APIs boot on local ports and expose `/healthz`.
 - The frontend boots on port `3500`.
@@ -181,6 +222,10 @@ X-Mock-Webhook-Signature
 - Failed deliveries can be retried.
 - Duplicate webhook simulation reuses the same provider event ID.
 - Out-of-order webhook simulation emits deterministic event order.
+- Bill-pay seed data creates fictional user, funding account, biller, biller account, and bill records.
+- Submitting a bill-pay payment order creates exactly one funding transfer.
+- Repeating payment submission with the same idempotency key returns the original order.
+- Provider events update the funding leg without duplicate effects.
 - Illegal transfer state transitions return `409`.
 - Lint and tests pass.
 - No service uses port `8080`.

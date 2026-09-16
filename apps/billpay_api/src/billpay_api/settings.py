@@ -11,6 +11,14 @@ class Settings(BaseSettings):
         validation_alias="BILLPAY_DATABASE_URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
+    provider_base_url: str = Field(
+        default="http://127.0.0.1:8502",
+        validation_alias="BILLPAY_PROVIDER_BASE_URL",
+    )
+    provider_api_key: str = Field(
+        default="dev_mock_provider_key_do_not_use_for_real_systems",
+        validation_alias="BILLPAY_PROVIDER_API_KEY",
+    )
 
 
 settings = Settings()

@@ -263,6 +263,46 @@ def make_sandbox_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/_sandbox")
 
+    @router.post("/seed-billpay-accounts")
+    def seed_billpay_accounts(session: Session = Depends(get_session)) -> dict[str, str]:
+        if session.get(Customer, "cus_seed_alice") is None:
+            session.add(
+                Customer(
+                    id="cus_seed_alice",
+                    external_user_id="user_alice_example",
+                    name="Alice Example",
+                    email="alice@example.test",
+                )
+            )
+        if session.get(BankAccount, "ba_seed_alice_checking") is None:
+            session.add(
+                BankAccount(
+                    id="ba_seed_alice_checking",
+                    customer_id="cus_seed_alice",
+                    bank_name="Fictional Test Bank",
+                    account_type="checking",
+                    last4="6789",
+                    verification_status="verified",
+                )
+            )
+        if session.get(BankAccount, "ba_seed_desert_electric") is None:
+            session.add(
+                BankAccount(
+                    id="ba_seed_desert_electric",
+                    customer_id="cus_seed_alice",
+                    bank_name="Fictional Biller Bank",
+                    account_type="checking",
+                    last4="4321",
+                    verification_status="verified",
+                )
+            )
+        session.commit()
+        return {
+            "customer_id": "cus_seed_alice",
+            "funding_account_id": "ba_seed_alice_checking",
+            "biller_receiving_account_id": "ba_seed_desert_electric",
+        }
+
     @router.post("/transfers/{transfer_id}/advance", response_model=TransferResponse)
     def advance_transfer(
         transfer_id: str,

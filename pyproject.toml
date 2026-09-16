@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ach-mock-bill-pay"
+version = "0.1.0"
+description = "Local-only mock ACH bill-pay educational system"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "celery>=5.4",
+    "fastapi>=0.115",
+    "httpx>=0.27",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "redis>=5.0",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["apps/billpay_api/src", "apps/mock_provider/src", "packages"]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "apps/billpay_api/tests",
+    "apps/mock_provider/tests",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true

@@ -2,19 +2,37 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from billpay_api.persistence.database import BillpayDatabase
-from billpay_api.persistence.models import PaymentOrder
+from billpay_api.persistence.models import (
+    BankAccount,
+    Bill,
+    Biller,
+    BillerAccount,
+    PaymentLeg,
+    PaymentOrder,
+    ProviderEventInbox,
+    User,
+)
 from billpay_api.providers.mock_ach import MockAchProviderClient
 from billpay_api.providers.types import AchProvider
 from billpay_api.schemas import (
+    BankAccountResponse,
+    BillerAccountResponse,
+    BillerResponse,
+    BillResponse,
+    DevOverviewResponse,
     LedgerAccountBalanceResponse,
     LedgerInvariantResponse,
     PaymentOrderCreate,
     PaymentOrderResponse,
+    ProviderEventInboxResponse,
     ProviderEventIngestResponse,
     SeedResponse,
+    UserResponse,
 )
 from billpay_api.services.ledger import (
     ensure_ledger_accounts,
@@ -47,6 +65,13 @@ def create_app(
         yield
 
     app = FastAPI(title="ACH Bill Pay Simulator API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:3500", "http://localhost:3500"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.billpay_db = billpay_db
     app.state.ach_provider = ach_provider
 
@@ -63,6 +88,61 @@ def create_app(
     @app.post("/dev/seed", response_model=SeedResponse)
     def seed(session: Session = Depends(get_session)) -> SeedResponse:
         return ensure_seed_data(session)
+
+    @app.get("/dev/overview", response_model=DevOverviewResponse)
+    def dev_overview(session: Session = Depends(get_session)) -> DevOverviewResponse:
+        users = session.scalars(select(User).order_by(User.id)).all()
+        bank_accounts = session.scalars(select(BankAccount).order_by(BankAccount.id)).all()
+        billers = session.scalars(select(Biller).order_by(Biller.id)).all()
+        biller_accounts = session.scalars(select(BillerAccount).order_by(BillerAccount.id)).all()
+        bills = session.scalars(select(Bill).order_by(Bill.due_date, Bill.id)).all()
+        payment_orders = session.scalars(
+            select(PaymentOrder).order_by(PaymentOrder.created_at.desc(), PaymentOrder.id)
+        ).all()
+        return DevOverviewResponse(
+            users=[
+                UserResponse(id=user.id, email=user.email, name=user.name, status=user.status)
+                for user in users
+            ],
+            bank_accounts=[
+                BankAccountResponse(
+                    id=account.id,
+                    user_id=account.user_id,
+                    bank_name=account.bank_name,
+                    account_type=account.account_type,
+                    last4=account.last4,
+                    verification_status=account.verification_status,
+                )
+                for account in bank_accounts
+            ],
+            billers=[
+                BillerResponse(id=biller.id, name=biller.name, status=biller.status)
+                for biller in billers
+            ],
+            biller_accounts=[
+                BillerAccountResponse(
+                    id=account.id,
+                    user_id=account.user_id,
+                    biller_id=account.biller_id,
+                    customer_reference=account.customer_reference,
+                    display_mask=account.display_mask,
+                    nickname=account.nickname,
+                )
+                for account in biller_accounts
+            ],
+            bills=[
+                BillResponse(
+                    id=bill.id,
+                    biller_account_id=bill.biller_account_id,
+                    amount=bill.amount,
+                    due_date=bill.due_date.isoformat(),
+                    description=bill.description,
+                    status=bill.status,
+                )
+                for bill in bills
+            ],
+            payment_orders=[payment_order_response(session, order) for order in payment_orders],
+        )
 
     @app.post("/v1/payment-orders", response_model=PaymentOrderResponse)
     async def submit_payment_order(
@@ -106,6 +186,15 @@ def create_app(
             )
         return await ingest_provider_event(session=session, provider=provider, payload=payload)
 
+    @app.get("/v1/provider-events", response_model=list[ProviderEventInboxResponse])
+    def list_provider_events(
+        session: Session = Depends(get_session),
+    ) -> list[ProviderEventInboxResponse]:
+        events = session.scalars(
+            select(ProviderEventInbox).order_by(ProviderEventInbox.received_at.desc())
+        ).all()
+        return [_provider_event_response(session, event) for event in events]
+
     @app.get("/v1/ledger/accounts", response_model=list[LedgerAccountBalanceResponse])
     def list_ledger_accounts(
         session: Session = Depends(get_session),
@@ -136,6 +225,37 @@ def create_app(
         )
 
     return app
+
+
+def _provider_event_response(
+    session: Session,
+    event: ProviderEventInbox,
+) -> ProviderEventInboxResponse:
+    payment_leg_id: str | None = None
+    try:
+        data = event.payload_json.get("data")
+        if isinstance(data, dict):
+            transfer = data.get("transfer")
+            if isinstance(transfer, dict):
+                transfer_id = transfer.get("id")
+                if transfer_id is not None:
+                    leg = session.scalars(
+                        select(PaymentLeg).where(
+                            PaymentLeg.provider_transfer_id == str(transfer_id)
+                        )
+                    ).one_or_none()
+                    if leg is not None:
+                        payment_leg_id = leg.id
+    except AttributeError:
+        payment_leg_id = None
+    return ProviderEventInboxResponse(
+        id=event.id,
+        provider_event_id=event.provider_event_id,
+        event_type=event.event_type,
+        payment_leg_id=payment_leg_id,
+        processed=event.processed_at is not None,
+        processing_error=event.processing_error,
+    )
 
 
 app = create_app()

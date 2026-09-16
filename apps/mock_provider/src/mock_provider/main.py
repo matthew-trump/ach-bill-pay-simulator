@@ -2,6 +2,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from mock_provider.api import make_sandbox_router, make_v1_router
 from mock_provider.database import ProviderDatabase
@@ -17,6 +18,13 @@ def create_app(database_url: str | None = None) -> FastAPI:
         yield
 
     app = FastAPI(title="Simulated ACH Provider API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://127.0.0.1:3500", "http://localhost:3500"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.provider_db = provider_db
 
     @app.get("/healthz")

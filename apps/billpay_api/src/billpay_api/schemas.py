@@ -7,6 +7,46 @@ class SeedResponse(BaseModel):
     bill_id: str
 
 
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    status: str
+
+
+class BankAccountResponse(BaseModel):
+    id: str
+    user_id: str
+    bank_name: str
+    account_type: str
+    last4: str
+    verification_status: str
+
+
+class BillerResponse(BaseModel):
+    id: str
+    name: str
+    status: str
+
+
+class BillerAccountResponse(BaseModel):
+    id: str
+    user_id: str
+    biller_id: str
+    customer_reference: str
+    display_mask: str
+    nickname: str
+
+
+class BillResponse(BaseModel):
+    id: str
+    biller_account_id: str
+    amount: str
+    due_date: str
+    description: str
+    status: str
+
+
 class PaymentOrderCreate(BaseModel):
     user_id: str
     bill_id: str
@@ -57,6 +97,24 @@ class ProviderEventIngestResponse(BaseModel):
     duplicate: bool
     processed: bool
     payment_leg_id: str | None = None
+
+
+class ProviderEventInboxResponse(BaseModel):
+    id: str
+    provider_event_id: str
+    event_type: str
+    payment_leg_id: str | None = None
+    processed: bool
+    processing_error: str | None = None
+
+
+class DevOverviewResponse(BaseModel):
+    users: list[UserResponse]
+    bank_accounts: list[BankAccountResponse]
+    billers: list[BillerResponse]
+    biller_accounts: list[BillerAccountResponse]
+    bills: list[BillResponse]
+    payment_orders: list[PaymentOrderResponse]
 
 
 class LedgerAccountBalanceResponse(BaseModel):

@@ -2,7 +2,7 @@
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
-This repository is currently at **Milestone 5: Ledger**. It can
+This repository is currently at **Milestone 6: Web UI**. It can
 create simulated provider customers, tokenize fictional bank accounts, create
 provider transfers, enforce provider idempotency, and move transfers through
 deterministic sandbox states. It can also register webhook endpoints, create
@@ -12,10 +12,12 @@ seed fictional user/biller/bill data, submit a payment order, create exactly one
 funding transfer through the provider abstraction, process provider events into
 an inbox without duplicate effects, and start a separate delivery transfer after
 the funding leg succeeds. It also posts immutable balanced ledger transactions
-for successful funding and delivery events.
+for successful funding and delivery events. The browser UI can drive the seeded
+happy path, inspect payment details, run sandbox state changes, and show ledger
+and provider-event status.
 
-It does not move money, connect to real providers, reconcile payments, or expose
-operational bill-pay workflows in the frontend yet.
+It does not move money, connect to real providers, reconcile payments, or provide
+production authentication or real account/biller onboarding.
 
 ## Safety Boundary
 
@@ -200,12 +202,14 @@ curl -sS -X POST "$BILLPAY/v1/payment-orders" \
   }'
 ```
 
-Milestone 5 bill-pay endpoints:
+Milestone 6 bill-pay endpoints:
 
 - `POST /dev/seed`
+- `GET /dev/overview`
 - `POST /v1/payment-orders`
 - `GET /v1/payment-orders/{payment_order_id}`
 - `POST /v1/provider-events`
+- `GET /v1/provider-events`
 - `GET /v1/ledger/accounts`
 - `GET /v1/ledger/invariants`
 
@@ -216,10 +220,15 @@ the same provider event ID is treated as a harmless duplicate. Successful fundin
 and delivery events post balanced ledger transactions once per payment leg
 outcome, even if the provider sends a retried success event.
 
-## Milestone 5 Acceptance
+The web UI on `http://127.0.0.1:3500` includes dashboard, bank-account, biller,
+bill, pay-bill, payment-detail, sandbox-control, and operations views for the
+seeded fictional scenario.
+
+## Milestone 6 Acceptance
 
 - Both APIs boot on local ports and expose `/healthz`.
 - The frontend boots on port `3500`.
+- Local browser requests from the Vite UI are allowed by both APIs.
 - Simulated provider customers, fictional bank accounts, and transfers can be created and retrieved.
 - Transfer creation is idempotent for matching requests and rejects changed request bodies with `409`.
 - Sandbox controls advance, fail, and return transfers deterministically.
@@ -244,6 +253,11 @@ outcome, even if the provider sends a retried success event.
 - Retried success events cannot double-post ledger transactions.
 - Payment-order detail responses include ledger transactions and entries.
 - Ledger account balance and invariant endpoints expose current ledger truth.
+- The dashboard shows bills due, pending payments, and completed payments.
+- The browser can seed data, submit the seeded bill payment, advance the funding leg, advance the delivery leg, and inspect the delivered payment.
+- Payment detail shows order status, both legs, provider events, and ledger entries.
+- Sandbox controls expose advance, fail, return, duplicate-event, and out-of-order simulations for visible payment legs.
+- Operations shows provider event processing failures and ledger balance status.
 - Illegal transfer state transitions return `409`.
 - Lint and tests pass.
 - No service uses port `8080`.

@@ -204,3 +204,36 @@ Milestone 5 adds a minimal immutable double-entry ledger.
   In short: bill-pay application state is now accompanied by separate ledger
   truth, and successful funding/delivery events produce balanced, explainable,
   idempotent ledger entries.
+
+== Milestone 6 ==
+
+Milestone 6 adds a functional browser UI for the seeded fictional workflow.
+
+  New capabilities:
+
+  - Use the web UI at http://127.0.0.1:3500 to:
+      - seed fictional provider and bill-pay data
+      - review dashboard counts for due bills and payments
+      - view the saved fictional funding account
+      - view the seeded biller and bill
+      - accept simulated authorization and submit a bill payment
+      - inspect payment status, funding/delivery legs, provider events, and
+        ledger entries
+      - advance, fail, return, duplicate, or reorder provider events for
+        visible payment legs
+      - inspect provider event processing and ledger invariant status
+  - Add local CORS support for the web UI on port 3500.
+  - Add UI-supporting bill-pay read endpoints:
+      - GET /dev/overview
+      - GET /v1/provider-events
+
+  Still not included:
+
+  - no production authentication
+  - no real account or biller onboarding
+  - no reconciliation
+  - no operations workflow for resolving exceptions
+
+  In short: the happy path can now be completed from the browser for seeded
+  fictional data, and failure/return states are visible without inspecting the
+  database.

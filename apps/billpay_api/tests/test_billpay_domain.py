@@ -73,6 +73,22 @@ def test_submitting_payment_creates_exactly_one_funding_transfer(tmp_path: Path)
         assert provider.calls[0].metadata["leg"] == "funding"
 
 
+def test_dev_overview_returns_seeded_ui_data(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        client.post("/dev/seed")
+
+        overview = client.get("/dev/overview")
+
+        assert overview.status_code == 200
+        body = overview.json()
+        assert body["users"][0]["id"] == "user_alice_example"
+        assert body["bank_accounts"][0]["last4"] == "6789"
+        assert body["billers"][0]["name"] == "Desert Electric"
+        assert body["bills"][0]["amount"] == "142.67"
+        assert body["payment_orders"] == []
+
+
 def test_successful_funding_starts_one_delivery_leg_without_duplicate_effects(
     tmp_path: Path,
 ) -> None:
@@ -125,6 +141,27 @@ def test_successful_funding_starts_one_delivery_leg_without_duplicate_effects(
         assert provider.calls[1].destination_account_id == "ba_seed_desert_electric"
         assert provider.calls[1].idempotency_key == f"delivery:{order['id']}"
         assert provider.calls[1].metadata["leg"] == "delivery"
+
+
+def test_provider_event_list_exposes_processed_events_for_ui(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-event-list")
+        event = provider_event(
+            event_id="evt_for_event_list",
+            transfer_id=order["legs"][0]["provider_transfer_id"],
+            status="succeeded",
+        )
+
+        client.post("/v1/provider-events", json=event)
+        events = client.get("/v1/provider-events")
+
+        assert events.status_code == 200
+        assert events.json()[0]["provider_event_id"] == "evt_for_event_list"
+        assert events.json()[0]["event_type"] == "transfer.succeeded"
+        assert events.json()[0]["processed"] is True
+        assert events.json()[0]["payment_leg_id"] == order["legs"][0]["id"]
 
 
 def test_funding_success_posts_balanced_ledger_once_for_retried_events(tmp_path: Path) -> None:

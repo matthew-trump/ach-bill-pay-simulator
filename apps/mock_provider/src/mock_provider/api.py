@@ -296,10 +296,22 @@ def make_sandbox_router(
                     verification_status="verified",
                 )
             )
+        if session.get(BankAccount, "ba_seed_billpay_settlement") is None:
+            session.add(
+                BankAccount(
+                    id="ba_seed_billpay_settlement",
+                    customer_id="cus_seed_alice",
+                    bank_name="Fictional Bill Pay Settlement Bank",
+                    account_type="checking",
+                    last4="2468",
+                    verification_status="verified",
+                )
+            )
         session.commit()
         return {
             "customer_id": "cus_seed_alice",
             "funding_account_id": "ba_seed_alice_checking",
+            "settlement_account_id": "ba_seed_billpay_settlement",
             "biller_receiving_account_id": "ba_seed_desert_electric",
         }
 

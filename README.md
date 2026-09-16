@@ -2,19 +2,19 @@
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
-This repository is currently at **Milestone 3: Bill-pay domain**. It can
+This repository is currently at **Milestone 4: Two-leg orchestration**. It can
 create simulated provider customers, tokenize fictional bank accounts, create
 provider transfers, enforce provider idempotency, and move transfers through
 deterministic sandbox states. It can also register webhook endpoints, create
 immutable transfer events, sign webhook delivery attempts, record responses, and
 retry or duplicate deliveries through sandbox controls. The bill-pay API can now
 seed fictional user/biller/bill data, submit a payment order, create exactly one
-funding transfer through the provider abstraction, and process provider events
-into an inbox without duplicate effects.
+funding transfer through the provider abstraction, process provider events into
+an inbox without duplicate effects, and start a separate delivery transfer after
+the funding leg succeeds.
 
 It does not move money, connect to real providers, post ledger entries,
-start delivery legs, orchestrate completed bill payments, or reconcile payments
-yet.
+reconcile payments, or expose operational bill-pay workflows in the frontend yet.
 
 ## Safety Boundary
 
@@ -199,17 +199,18 @@ curl -sS -X POST "$BILLPAY/v1/payment-orders" \
   }'
 ```
 
-Milestone 3 bill-pay endpoints:
+Milestone 4 bill-pay endpoints:
 
 - `POST /dev/seed`
 - `POST /v1/payment-orders`
 - `POST /v1/provider-events`
 
 `POST /v1/provider-events` records provider events in an inbox and updates the
-funding leg. Reposting the same provider event ID is treated as a harmless
-duplicate.
+matching payment leg. A funding success starts exactly one delivery transfer
+from the simulated bill-pay settlement account to the biller account. Reposting
+the same provider event ID is treated as a harmless duplicate.
 
-## Milestone 3 Acceptance
+## Milestone 4 Acceptance
 
 - Both APIs boot on local ports and expose `/healthz`.
 - The frontend boots on port `3500`.
@@ -224,8 +225,13 @@ duplicate.
 - Out-of-order webhook simulation emits deterministic event order.
 - Bill-pay seed data creates fictional user, funding account, biller, biller account, and bill records.
 - Submitting a bill-pay payment order creates exactly one funding transfer.
+- Funding transfers land in the simulated bill-pay settlement provider account.
 - Repeating payment submission with the same idempotency key returns the original order.
-- Provider events update the funding leg without duplicate effects.
+- Provider events update payment legs without duplicate effects.
+- A successful funding event starts exactly one delivery transfer.
+- Delivery success marks the payment order `delivered`.
+- Funding failure before delivery marks the payment order `failed`.
+- Delivery failure or a late funding return after delivery marks the payment order `action_required`.
 - Illegal transfer state transitions return `409`.
 - Lint and tests pass.
 - No service uses port `8080`.

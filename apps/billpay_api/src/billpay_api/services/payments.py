@@ -24,6 +24,7 @@ from billpay_api.schemas import (
     PaymentOrderResponse,
     ProviderEventIngestResponse,
 )
+from billpay_api.settings import settings
 
 
 async def create_payment_order(
@@ -52,14 +53,14 @@ async def create_payment_order(
         bill.biller_account_id,
         "biller account not found",
     )
-    biller = _required(session, Biller, biller_account.biller_id, "biller not found")
+    _required(session, Biller, biller_account.biller_id, "biller not found")
     if funding_account.user_id != user.id or biller_account.user_id != user.id:
         raise ValueError("payment entities do not belong to the same user")
 
     order_id = new_id("pay")
     transfer = await provider.create_transfer(
         source_account_id=funding_account.provider_account_id,
-        destination_account_id=biller.provider_destination_account_id,
+        destination_account_id=settings.settlement_provider_account_id,
         amount=Decimal(bill.amount),
         idempotency_key=f"funding:{order_id}",
         metadata={"payment_order_id": order_id, "leg": "funding"},
@@ -80,7 +81,7 @@ async def create_payment_order(
         leg_type="funding",
         provider_transfer_id=transfer.provider_transfer_id,
         source_provider_account_id=funding_account.provider_account_id,
-        destination_provider_account_id=biller.provider_destination_account_id,
+        destination_provider_account_id=settings.settlement_provider_account_id,
         amount=bill.amount,
         status=transfer.status,
         return_code=transfer.return_code,
@@ -103,9 +104,10 @@ async def create_payment_order(
     return payment_order_response(session, order)
 
 
-def ingest_provider_event(
+async def ingest_provider_event(
     *,
     session: Session,
+    provider: AchProvider,
     payload: dict[str, object],
 ) -> ProviderEventIngestResponse:
     provider_event_id = str(payload["id"])
@@ -137,7 +139,7 @@ def ingest_provider_event(
             raise ValueError("payment leg not found for provider transfer")
         leg.status = str(transfer["status"])
         leg.return_code = _optional_str(transfer.get("return_code"))
-        _update_order_for_funding_event(session, leg)
+        await _update_order_for_leg_event(session=session, provider=provider, leg=leg)
         inbox.processed_at = datetime.now(UTC)
         session.commit()
         return ProviderEventIngestResponse(
@@ -158,8 +160,9 @@ def ingest_provider_event(
 
 def payment_order_response(session: Session, order: PaymentOrder) -> PaymentOrderResponse:
     legs = session.scalars(
-        select(PaymentLeg).where(PaymentLeg.payment_order_id == order.id).order_by(PaymentLeg.id)
+        select(PaymentLeg).where(PaymentLeg.payment_order_id == order.id)
     ).all()
+    ordered_legs = sorted(legs, key=lambda leg: (0 if leg.leg_type == "funding" else 1, leg.id))
     return PaymentOrderResponse(
         id=order.id,
         user_id=order.user_id,
@@ -176,23 +179,104 @@ def payment_order_response(session: Session, order: PaymentOrder) -> PaymentOrde
                 status=leg.status,
                 return_code=leg.return_code,
             )
-            for leg in legs
+            for leg in ordered_legs
         ],
     )
 
 
-def _update_order_for_funding_event(session: Session, leg: PaymentLeg) -> None:
+async def _update_order_for_leg_event(
+    *,
+    session: Session,
+    provider: AchProvider,
+    leg: PaymentLeg,
+) -> None:
     order = session.get(PaymentOrder, leg.payment_order_id)
-    if order is None or leg.leg_type != "funding":
+    if order is None:
         return
+    if leg.leg_type == "delivery":
+        _update_order_for_delivery_event(order, leg)
+        return
+    if leg.leg_type != "funding":
+        return
+
+    delivery_leg = _delivery_leg_for_order(session, order.id)
     if leg.status == "succeeded":
-        order.status = "funded"
+        if delivery_leg is None:
+            order.status = "funded"
+            await _create_delivery_leg(
+                session=session,
+                provider=provider,
+                order=order,
+                funding_leg=leg,
+            )
+        else:
+            _update_order_for_delivery_event(order, delivery_leg)
     elif leg.status == "failed":
-        order.status = "failed"
+        order.status = "action_required" if delivery_leg is not None else "failed"
     elif leg.status == "returned":
-        order.status = "returned"
+        order.status = "action_required" if delivery_leg is not None else "returned"
     else:
         order.status = "funding_pending"
+
+
+async def _create_delivery_leg(
+    *,
+    session: Session,
+    provider: AchProvider,
+    order: PaymentOrder,
+    funding_leg: PaymentLeg,
+) -> None:
+    bill = _required(session, Bill, order.bill_id, "bill not found")
+    biller_account = _required(
+        session,
+        BillerAccount,
+        bill.biller_account_id,
+        "biller account not found",
+    )
+    biller = _required(session, Biller, biller_account.biller_id, "biller not found")
+    transfer = await provider.create_transfer(
+        source_account_id=settings.settlement_provider_account_id,
+        destination_account_id=biller.provider_destination_account_id,
+        amount=Decimal(order.amount),
+        idempotency_key=f"delivery:{order.id}",
+        metadata={"payment_order_id": order.id, "leg": "delivery"},
+    )
+    session.add(
+        PaymentLeg(
+            id=new_id("leg"),
+            payment_order_id=order.id,
+            leg_type="delivery",
+            provider_transfer_id=transfer.provider_transfer_id,
+            source_provider_account_id=settings.settlement_provider_account_id,
+            destination_provider_account_id=biller.provider_destination_account_id,
+            amount=order.amount,
+            status=transfer.status,
+            return_code=transfer.return_code,
+            provider_created_at=datetime.now(UTC),
+        )
+    )
+    funding_leg.settled_at = datetime.now(UTC)
+    order.status = "delivery_pending"
+    session.flush()
+
+
+def _update_order_for_delivery_event(order: PaymentOrder, leg: PaymentLeg) -> None:
+    if leg.status == "succeeded":
+        order.status = "delivered"
+        leg.settled_at = datetime.now(UTC)
+    elif leg.status in {"failed", "returned"}:
+        order.status = "action_required"
+    else:
+        order.status = "delivery_pending"
+
+
+def _delivery_leg_for_order(session: Session, payment_order_id: str) -> PaymentLeg | None:
+    return session.scalars(
+        select(PaymentLeg).where(
+            PaymentLeg.payment_order_id == payment_order_id,
+            PaymentLeg.leg_type == "delivery",
+        )
+    ).one_or_none()
 
 
 def _transfer_from_event(payload: dict[str, object]) -> dict[str, object]:

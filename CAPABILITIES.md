@@ -72,7 +72,7 @@ Milestone 2 added provider webhooks.
 
   Tests now include a local webhook receiver that verifies signatures and confirms delivery records.
 
-== Milestone 3==
+== Milestone 3 ==
 
 Milestone 3 adds the first real bill-pay application behavior.
 
@@ -122,3 +122,45 @@ Milestone 3 adds the first real bill-pay application behavior.
   - no completed bill-payment lifecycle yet
 
   In short: we now have the first bridge between the bill-pay app and the simulated provider: submitting a payment creates exactly one funding transfer.
+
+== Milestone 4 ==
+
+Milestone 4 adds two-leg bill-pay orchestration.
+
+  New capabilities:
+
+  - Funding transfers now debit Alice’s saved funding account and credit a
+    simulated bill-pay settlement provider account.
+  - A successful funding provider event starts a delivery leg exactly once:
+      - source: simulated bill-pay settlement account
+      - destination: Desert Electric provider destination account
+      - idempotency key: delivery:{payment_order_id}
+  - Payment orders now move through explicit two-leg states:
+      - funding_pending
+      - delivery_pending
+      - delivered
+      - failed
+      - returned
+      - action_required
+  - Delivery provider events update the delivery leg and payment order.
+  - Funding failure before delivery marks the order failed.
+  - Funding return before delivery marks the order returned.
+  - Delivery failure or delivery return marks the order action_required.
+  - A late funding return after delivery is preserved as an exception state:
+      - funding leg becomes returned
+      - delivery leg remains visible
+      - payment order becomes action_required
+  - A database uniqueness constraint prevents more than one funding leg or
+    delivery leg per payment order.
+  - The mock provider seed endpoint now creates the simulated bill-pay
+    settlement account.
+
+  Still not included:
+
+  - no automatic webhook receiver/signature verification on bill-pay side yet
+  - no ledger
+  - no reconciliation
+  - frontend still does not expose workflows
+
+  In short: a bill payment now has separate funding and delivery transfers, and
+  the app reaches explicit states for the principal success and failure paths.

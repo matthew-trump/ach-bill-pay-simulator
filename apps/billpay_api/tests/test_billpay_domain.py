@@ -19,6 +19,7 @@ class TransferCall:
 class FakeAchProvider:
     def __init__(self) -> None:
         self.calls: list[TransferCall] = []
+        self.next_id = 1
 
     async def create_transfer(
         self,
@@ -38,8 +39,10 @@ class FakeAchProvider:
                 metadata=metadata,
             )
         )
+        transfer_id = f"tr_fake_{metadata['leg']}_{self.next_id:03d}"
+        self.next_id += 1
         return TransferResult(
-            provider_transfer_id="tr_fake_funding_001",
+            provider_transfer_id=transfer_id,
             status=TransferStatus.CREATED,
         )
 
@@ -66,11 +69,13 @@ def test_submitting_payment_creates_exactly_one_funding_transfer(tmp_path: Path)
         assert first.json()["legs"][0]["provider_transfer_id"] == "tr_fake_funding_001"
         assert len(provider.calls) == 1
         assert provider.calls[0].source_account_id == "ba_seed_alice_checking"
-        assert provider.calls[0].destination_account_id == "ba_seed_desert_electric"
+        assert provider.calls[0].destination_account_id == "ba_seed_billpay_settlement"
         assert provider.calls[0].metadata["leg"] == "funding"
 
 
-def test_provider_event_updates_funding_leg_without_duplicate_effects(tmp_path: Path) -> None:
+def test_successful_funding_starts_one_delivery_leg_without_duplicate_effects(
+    tmp_path: Path,
+) -> None:
     provider = FakeAchProvider()
     with billpay_client(tmp_path, provider) as client:
         seed = client.post("/dev/seed").json()
@@ -110,9 +115,163 @@ def test_provider_event_updates_funding_leg_without_duplicate_effects(tmp_path: 
                 "authorization_text": "I authorize this simulated ACH debit.",
             },
         ).json()
-        assert repeat_order["status"] == "funded"
+        assert repeat_order["status"] == "delivery_pending"
         assert repeat_order["legs"][0]["status"] == "succeeded"
+        assert len(repeat_order["legs"]) == 2
+        assert repeat_order["legs"][1]["leg_type"] == "delivery"
+        assert repeat_order["legs"][1]["provider_transfer_id"] == "tr_fake_delivery_002"
+        assert len(provider.calls) == 2
+        assert provider.calls[1].source_account_id == "ba_seed_billpay_settlement"
+        assert provider.calls[1].destination_account_id == "ba_seed_desert_electric"
+        assert provider.calls[1].idempotency_key == f"delivery:{order['id']}"
+        assert provider.calls[1].metadata["leg"] == "delivery"
+
+
+def test_delivery_success_marks_payment_delivered(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-delivery-success")
+        funding_event = provider_event(
+            event_id="evt_funding_succeeded",
+            transfer_id=order["legs"][0]["provider_transfer_id"],
+            status="succeeded",
+            leg="funding",
+        )
+        client.post("/v1/provider-events", json=funding_event)
+        order_with_delivery = submit_seed_payment(client, seed, "pay-delivery-success")
+        delivery_leg = order_with_delivery["legs"][1]
+
+        response = client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_delivery_succeeded",
+                transfer_id=delivery_leg["provider_transfer_id"],
+                status="succeeded",
+                leg="delivery",
+            ),
+        )
+        final_order = submit_seed_payment(client, seed, "pay-delivery-success")
+
+        assert response.status_code == 200
+        assert final_order["status"] == "delivered"
+        assert final_order["legs"][1]["status"] == "succeeded"
+
+
+def test_funding_failure_before_delivery_marks_payment_failed(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-funding-fails")
+
+        response = client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_funding_failed",
+                transfer_id=order["legs"][0]["provider_transfer_id"],
+                status="failed",
+                leg="funding",
+            ),
+        )
+        final_order = submit_seed_payment(client, seed, "pay-funding-fails")
+
+        assert response.status_code == 200
+        assert final_order["status"] == "failed"
+        assert len(final_order["legs"]) == 1
         assert len(provider.calls) == 1
+
+
+def test_delivery_failure_after_funding_marks_action_required(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-delivery-fails")
+        client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_funding_for_failed_delivery",
+                transfer_id=order["legs"][0]["provider_transfer_id"],
+                status="succeeded",
+                leg="funding",
+            ),
+        )
+        order_with_delivery = submit_seed_payment(client, seed, "pay-delivery-fails")
+
+        response = client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_delivery_failed",
+                transfer_id=order_with_delivery["legs"][1]["provider_transfer_id"],
+                status="failed",
+                leg="delivery",
+            ),
+        )
+        final_order = submit_seed_payment(client, seed, "pay-delivery-fails")
+
+        assert response.status_code == 200
+        assert final_order["status"] == "action_required"
+        assert final_order["legs"][1]["status"] == "failed"
+
+
+def test_late_funding_return_after_delivery_marks_action_required(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-late-return")
+        client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_funding_before_late_return",
+                transfer_id=order["legs"][0]["provider_transfer_id"],
+                status="succeeded",
+                leg="funding",
+            ),
+        )
+        order_with_delivery = submit_seed_payment(client, seed, "pay-late-return")
+        client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_delivery_before_late_return",
+                transfer_id=order_with_delivery["legs"][1]["provider_transfer_id"],
+                status="succeeded",
+                leg="delivery",
+            ),
+        )
+
+        response = client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_late_funding_return",
+                transfer_id=order["legs"][0]["provider_transfer_id"],
+                status="returned",
+                return_code="R01",
+                leg="funding",
+            ),
+        )
+        final_order = submit_seed_payment(client, seed, "pay-late-return")
+
+        assert response.status_code == 200
+        assert final_order["status"] == "action_required"
+        assert final_order["legs"][0]["status"] == "returned"
+        assert final_order["legs"][0]["return_code"] == "R01"
+        assert final_order["legs"][1]["status"] == "succeeded"
+
+
+def submit_seed_payment(
+    client: TestClient,
+    seed: dict[str, str],
+    idempotency_key: str,
+) -> dict[str, object]:
+    return client.post(
+        "/v1/payment-orders",
+        json={
+            "user_id": seed["user_id"],
+            "bill_id": seed["bill_id"],
+            "funding_account_id": seed["funding_account_id"],
+            "idempotency_key": idempotency_key,
+            "authorization_text": "I authorize this simulated ACH debit.",
+        },
+    ).json()
 
 
 def billpay_client(tmp_path: Path, provider: FakeAchProvider) -> TestClient:
@@ -120,7 +279,14 @@ def billpay_client(tmp_path: Path, provider: FakeAchProvider) -> TestClient:
     return TestClient(create_app(database_url=f"sqlite:///{db_path}", provider=provider))
 
 
-def provider_event(*, event_id: str, transfer_id: str, status: str) -> dict[str, object]:
+def provider_event(
+    *,
+    event_id: str,
+    transfer_id: str,
+    status: str,
+    leg: str = "funding",
+    return_code: str | None = None,
+) -> dict[str, object]:
     return {
         "id": event_id,
         "type": f"transfer.{status}",
@@ -129,9 +295,9 @@ def provider_event(*, event_id: str, transfer_id: str, status: str) -> dict[str,
             "transfer": {
                 "id": transfer_id,
                 "status": status,
-                "return_code": None,
+                "return_code": return_code,
                 "amount": {"currency": "USD", "value": "142.67"},
-                "metadata": {"payment_order_id": "pay_test", "leg": "funding"},
+                "metadata": {"payment_order_id": "pay_test", "leg": leg},
             }
         },
     }

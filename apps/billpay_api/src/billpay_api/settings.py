@@ -19,6 +19,10 @@ class Settings(BaseSettings):
         default="dev_mock_provider_key_do_not_use_for_real_systems",
         validation_alias="BILLPAY_PROVIDER_API_KEY",
     )
+    settlement_provider_account_id: str = Field(
+        default="ba_seed_billpay_settlement",
+        validation_alias="BILLPAY_SETTLEMENT_PROVIDER_ACCOUNT_ID",
+    )
 
 
 settings = Settings()

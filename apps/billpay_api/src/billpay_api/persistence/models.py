@@ -91,6 +91,7 @@ class PaymentOrder(Base):
 
 class PaymentLeg(Base):
     __tablename__ = "billpay_payment_legs"
+    __table_args__ = (UniqueConstraint("payment_order_id", "leg_type"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     payment_order_id: Mapped[str] = mapped_column(

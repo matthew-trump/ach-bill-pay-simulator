@@ -71,6 +71,7 @@ def create_app(
     async def receive_provider_event(
         request: Request,
         session: Session = Depends(get_session),
+        provider: AchProvider = Depends(get_provider),
     ) -> ProviderEventIngestResponse:
         payload = await request.json()
         if not isinstance(payload, dict):
@@ -78,7 +79,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="event payload must be an object",
             )
-        return ingest_provider_event(session=session, payload=payload)
+        return await ingest_provider_event(session=session, provider=provider, payload=payload)
 
     return app
 

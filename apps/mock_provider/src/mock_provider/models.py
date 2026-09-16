@@ -64,3 +64,39 @@ class IdempotencyRecord(Base):
     response_body: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     canonical_request: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class WebhookEndpoint(Base):
+    __tablename__ = "provider_webhook_endpoints"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    secret: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ProviderEvent(Base):
+    __tablename__ = "provider_events"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    type: Mapped[str] = mapped_column(String(80), nullable=False)
+    transfer_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "provider_webhook_deliveries"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    endpoint_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    attempt_number: Mapped[int] = mapped_column(nullable=False)
+    request_headers: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
+    request_body: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    response_status: Mapped[int | None] = mapped_column(nullable=True)
+    response_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

@@ -78,3 +78,33 @@ class TransferResponse(BaseModel):
 
 class ReturnTransferRequest(BaseModel):
     return_code: str = Field(min_length=3, max_length=3)
+
+
+class WebhookEndpointCreate(BaseModel):
+    url: str = Field(min_length=1, max_length=500)
+
+
+class WebhookEndpointResponse(BaseModel):
+    id: str
+    url: str
+    secret: str
+    status: str
+
+
+class ProviderEventResponse(BaseModel):
+    id: str
+    type: str
+    transfer_id: str
+    payload: dict[str, object]
+
+
+class WebhookDeliveryResponse(BaseModel):
+    id: str
+    event_id: str
+    endpoint_id: str
+    attempt_number: int
+    request_headers: dict[str, str]
+    request_body: dict[str, object]
+    response_status: int | None = None
+    response_body: str | None = None
+    error: str | None = None

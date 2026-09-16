@@ -23,8 +23,19 @@ def create_app(database_url: str | None = None) -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok", "service": settings.service_name}
 
-    app.include_router(make_v1_router(get_session=provider_db.session, api_key=settings.api_key))
-    app.include_router(make_sandbox_router(get_session=provider_db.session))
+    app.include_router(
+        make_v1_router(
+            get_session=provider_db.session,
+            api_key=settings.api_key,
+            webhook_timeout_seconds=settings.webhook_timeout_seconds,
+        )
+    )
+    app.include_router(
+        make_sandbox_router(
+            get_session=provider_db.session,
+            webhook_timeout_seconds=settings.webhook_timeout_seconds,
+        )
+    )
     return app
 
 

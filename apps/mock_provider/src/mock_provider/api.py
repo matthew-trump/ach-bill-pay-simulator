@@ -5,15 +5,27 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mock_provider.ids import new_id
-from mock_provider.models import BankAccount, Customer, IdempotencyRecord, Transfer
+from mock_provider.models import (
+    BankAccount,
+    Customer,
+    IdempotencyRecord,
+    ProviderEvent,
+    Transfer,
+    WebhookDelivery,
+    WebhookEndpoint,
+)
 from mock_provider.schemas import (
     BankAccountCreate,
     BankAccountResponse,
     CustomerCreate,
     CustomerResponse,
+    ProviderEventResponse,
     ReturnTransferRequest,
     TransferCreate,
     TransferResponse,
+    WebhookDeliveryResponse,
+    WebhookEndpointCreate,
+    WebhookEndpointResponse,
 )
 from mock_provider.services import (
     canonical_request_body,
@@ -27,12 +39,20 @@ from mock_provider.state_machine import (
     TransferTransitionError,
     next_advance_status,
 )
+from mock_provider.webhooks import (
+    create_duplicate_event,
+    create_out_of_order_events,
+    create_transfer_event,
+    deliver_event,
+    deliver_event_to_active_endpoints,
+)
 
 
 def make_v1_router(
     *,
     get_session: Callable[[], Iterator[Session]],
     api_key: str,
+    webhook_timeout_seconds: float,
 ) -> APIRouter:
     router = APIRouter(prefix="/v1", dependencies=[Depends(_require_bearer(api_key))])
 
@@ -166,14 +186,81 @@ def make_v1_router(
     ) -> TransferResponse:
         transfer = _get_transfer_or_404(session, transfer_id)
         transition_transfer(transfer, TransferStatus.CANCELED)
+        event = create_transfer_event(session, transfer)
+        deliver_event_to_active_endpoints(
+            session,
+            event,
+            timeout_seconds=webhook_timeout_seconds,
+        )
         session.commit()
         session.refresh(transfer)
         return response_from_transfer(transfer)
 
+    @router.post(
+        "/webhook-endpoints",
+        response_model=WebhookEndpointResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_webhook_endpoint(
+        payload: WebhookEndpointCreate,
+        session: Session = Depends(get_session),
+    ) -> WebhookEndpoint:
+        endpoint = WebhookEndpoint(
+            id=new_id("we"),
+            url=payload.url,
+            secret=new_id("whsec"),
+            status="active",
+        )
+        session.add(endpoint)
+        session.commit()
+        session.refresh(endpoint)
+        return endpoint
+
+    @router.get("/webhook-endpoints", response_model=list[WebhookEndpointResponse])
+    def list_webhook_endpoints(
+        session: Session = Depends(get_session),
+    ) -> list[WebhookEndpoint]:
+        return list(
+            session.scalars(select(WebhookEndpoint).order_by(WebhookEndpoint.created_at)).all()
+        )
+
+    @router.delete("/webhook-endpoints/{endpoint_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_webhook_endpoint(
+        endpoint_id: str,
+        session: Session = Depends(get_session),
+    ) -> Response:
+        endpoint = session.get(WebhookEndpoint, endpoint_id)
+        if endpoint is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="webhook endpoint not found",
+            )
+        endpoint.status = "disabled"
+        session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @router.get("/events", response_model=list[ProviderEventResponse])
+    def list_events(session: Session = Depends(get_session)) -> list[ProviderEventResponse]:
+        events = session.scalars(select(ProviderEvent).order_by(ProviderEvent.created_at)).all()
+        return [_event_response(event) for event in events]
+
+    @router.get("/webhook-deliveries", response_model=list[WebhookDeliveryResponse])
+    def list_webhook_deliveries(
+        session: Session = Depends(get_session),
+    ) -> list[WebhookDeliveryResponse]:
+        deliveries = session.scalars(
+            select(WebhookDelivery).order_by(WebhookDelivery.created_at)
+        ).all()
+        return [_delivery_response(delivery) for delivery in deliveries]
+
     return router
 
 
-def make_sandbox_router(get_session: Callable[[], Iterator[Session]]) -> APIRouter:
+def make_sandbox_router(
+    get_session: Callable[[], Iterator[Session]],
+    *,
+    webhook_timeout_seconds: float,
+) -> APIRouter:
     router = APIRouter(prefix="/_sandbox")
 
     @router.post("/transfers/{transfer_id}/advance", response_model=TransferResponse)
@@ -187,6 +274,12 @@ def make_sandbox_router(get_session: Callable[[], Iterator[Session]]) -> APIRout
         except TransferTransitionError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         transition_transfer(transfer, target)
+        event = create_transfer_event(session, transfer)
+        deliver_event_to_active_endpoints(
+            session,
+            event,
+            timeout_seconds=webhook_timeout_seconds,
+        )
         session.commit()
         session.refresh(transfer)
         return response_from_transfer(transfer)
@@ -198,6 +291,12 @@ def make_sandbox_router(get_session: Callable[[], Iterator[Session]]) -> APIRout
     ) -> TransferResponse:
         transfer = _get_transfer_or_404(session, transfer_id)
         transition_transfer(transfer, TransferStatus.FAILED)
+        event = create_transfer_event(session, transfer)
+        deliver_event_to_active_endpoints(
+            session,
+            event,
+            timeout_seconds=webhook_timeout_seconds,
+        )
         session.commit()
         session.refresh(transfer)
         return response_from_transfer(transfer)
@@ -218,9 +317,84 @@ def make_sandbox_router(get_session: Callable[[], Iterator[Session]]) -> APIRout
         transition_transfer(transfer, TransferStatus.RETURNED)
         transfer.return_code = return_code
         transfer.return_description = RETURN_CODES[return_code]
+        event = create_transfer_event(session, transfer)
+        deliver_event_to_active_endpoints(
+            session,
+            event,
+            timeout_seconds=webhook_timeout_seconds,
+        )
         session.commit()
         session.refresh(transfer)
         return response_from_transfer(transfer)
+
+    @router.post(
+        "/transfers/{transfer_id}/duplicate-last-webhook",
+        response_model=ProviderEventResponse,
+    )
+    def duplicate_last_webhook(
+        transfer_id: str,
+        session: Session = Depends(get_session),
+    ) -> ProviderEventResponse:
+        _get_transfer_or_404(session, transfer_id)
+        event = create_duplicate_event(session, transfer_id)
+        if event is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="no event to duplicate",
+            )
+        deliver_event_to_active_endpoints(
+            session,
+            event,
+            timeout_seconds=webhook_timeout_seconds,
+        )
+        session.commit()
+        return _event_response(event)
+
+    @router.post(
+        "/transfers/{transfer_id}/send-out-of-order-events",
+        response_model=list[ProviderEventResponse],
+    )
+    def send_out_of_order_events(
+        transfer_id: str,
+        session: Session = Depends(get_session),
+    ) -> list[ProviderEventResponse]:
+        transfer = _get_transfer_or_404(session, transfer_id)
+        events = create_out_of_order_events(session, transfer)
+        for event in events:
+            deliver_event_to_active_endpoints(
+                session,
+                event,
+                timeout_seconds=webhook_timeout_seconds,
+            )
+        session.commit()
+        return [_event_response(event) for event in events]
+
+    @router.post(
+        "/webhook-deliveries/{delivery_id}/retry",
+        response_model=WebhookDeliveryResponse,
+    )
+    def retry_webhook_delivery(
+        delivery_id: str,
+        session: Session = Depends(get_session),
+    ) -> WebhookDeliveryResponse:
+        original = session.get(WebhookDelivery, delivery_id)
+        if original is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="delivery not found")
+        event = session.get(ProviderEvent, original.event_id)
+        endpoint = session.get(WebhookEndpoint, original.endpoint_id)
+        if event is None or endpoint is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="delivery target not found",
+            )
+        delivery = deliver_event(
+            session,
+            event,
+            endpoint,
+            timeout_seconds=webhook_timeout_seconds,
+        )
+        session.commit()
+        return _delivery_response(delivery)
 
     return router
 
@@ -252,3 +426,26 @@ def _get_transfer_or_404(session: Session, transfer_id: str) -> Transfer:
     if transfer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="transfer not found")
     return transfer
+
+
+def _event_response(event: ProviderEvent) -> ProviderEventResponse:
+    return ProviderEventResponse(
+        id=event.id,
+        type=event.type,
+        transfer_id=event.transfer_id,
+        payload=event.payload_json,
+    )
+
+
+def _delivery_response(delivery: WebhookDelivery) -> WebhookDeliveryResponse:
+    return WebhookDeliveryResponse(
+        id=delivery.id,
+        event_id=delivery.event_id,
+        endpoint_id=delivery.endpoint_id,
+        attempt_number=delivery.attempt_number,
+        request_headers=delivery.request_headers,
+        request_body=delivery.request_body,
+        response_status=delivery.response_status,
+        response_body=delivery.response_body,
+        error=delivery.error,
+    )

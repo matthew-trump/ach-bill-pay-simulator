@@ -2,13 +2,15 @@
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
-This repository is currently at **Milestone 1: Simulated-provider core**. It can
+This repository is currently at **Milestone 2: Provider webhooks**. It can
 create simulated provider customers, tokenize fictional bank accounts, create
 provider transfers, enforce provider idempotency, and move transfers through
-deterministic sandbox states.
+deterministic sandbox states. It can also register webhook endpoints, create
+immutable transfer events, sign webhook delivery attempts, record responses, and
+retry or duplicate deliveries through sandbox controls.
 
-It does not move money, connect to providers, send webhooks, post ledger
-entries, orchestrate bill payments, or reconcile payments yet.
+It does not move money, connect to real providers, post ledger entries,
+orchestrate bill payments, or reconcile payments yet.
 
 ## Safety Boundary
 
@@ -128,7 +130,7 @@ curl -sS -X POST "$PROVIDER/v1/customers" \
   -d '{"external_user_id":"user_alice_example","name":"Alice Example","email":"alice@example.test"}'
 ```
 
-Milestone 1 supports:
+The simulated provider supports:
 
 - `POST /v1/customers`
 - `GET /v1/customers/{customer_id}`
@@ -139,19 +141,46 @@ Milestone 1 supports:
 - `GET /v1/transfers/{transfer_id}`
 - `GET /v1/transfers`
 - `POST /v1/transfers/{transfer_id}/cancel`
+- `POST /v1/webhook-endpoints`
+- `GET /v1/webhook-endpoints`
+- `DELETE /v1/webhook-endpoints/{endpoint_id}`
+- `GET /v1/events`
+- `GET /v1/webhook-deliveries`
 - `POST /_sandbox/transfers/{transfer_id}/advance`
 - `POST /_sandbox/transfers/{transfer_id}/fail`
 - `POST /_sandbox/transfers/{transfer_id}/return`
+- `POST /_sandbox/transfers/{transfer_id}/duplicate-last-webhook`
+- `POST /_sandbox/transfers/{transfer_id}/send-out-of-order-events`
+- `POST /_sandbox/webhook-deliveries/{delivery_id}/retry`
 
 `POST /v1/transfers` requires an `Idempotency-Key` header.
 
-## Milestone 1 Acceptance
+Webhook delivery requests are signed with HMAC-SHA256 over:
+
+```text
+timestamp + "." + raw_request_body
+```
+
+The provider sends:
+
+```text
+X-Mock-Webhook-Timestamp
+X-Mock-Webhook-Signature
+```
+
+## Milestone 2 Acceptance
 
 - Both APIs boot on local ports and expose `/healthz`.
 - The frontend boots on port `3500`.
 - Simulated provider customers, fictional bank accounts, and transfers can be created and retrieved.
 - Transfer creation is idempotent for matching requests and rejects changed request bodies with `409`.
 - Sandbox controls advance, fail, and return transfers deterministically.
+- Webhook endpoints can be registered, listed, and disabled.
+- Transfer state changes create immutable provider events.
+- Webhook deliveries are signed and persisted with response status or error details.
+- Failed deliveries can be retried.
+- Duplicate webhook simulation reuses the same provider event ID.
+- Out-of-order webhook simulation emits deterministic event order.
 - Illegal transfer state transitions return `409`.
 - Lint and tests pass.
 - No service uses port `8080`.

@@ -7,7 +7,7 @@ class Settings(BaseSettings):
 
     service_name: str = "billpay_api"
     database_url: str = Field(
-        default="postgresql+psycopg://billpay:billpay@localhost:5432/billpay",
+        default="postgresql+psycopg://billpay:billpay@localhost:5433/billpay",
         validation_alias="BILLPAY_DATABASE_URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")

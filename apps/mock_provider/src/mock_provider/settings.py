@@ -7,7 +7,7 @@ class Settings(BaseSettings):
 
     service_name: str = "mock_provider"
     database_url: str = Field(
-        default="postgresql+psycopg://mock_provider:mock_provider@localhost:5432/mock_provider",
+        default="postgresql+psycopg://mock_provider:mock_provider@localhost:5433/mock_provider",
         validation_alias="MOCK_PROVIDER_DATABASE_URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")

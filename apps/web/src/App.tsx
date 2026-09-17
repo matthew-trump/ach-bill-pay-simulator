@@ -114,6 +114,27 @@ type LedgerInvariant = {
   unbalanced_transaction_ids: string[];
 };
 
+type ReconciliationRun = {
+  id: string;
+  status: string;
+  checked_payment_legs: number;
+  checked_provider_transfers: number;
+  exception_count: number;
+};
+
+type ReconciliationException = {
+  id: string;
+  reconciliation_run_id: string;
+  exception_type: string;
+  severity: string;
+  payment_order_id: string | null;
+  payment_leg_id: string | null;
+  provider_transfer_id: string | null;
+  description: string;
+  details: Record<string, unknown>;
+  status: string;
+};
+
 type Overview = {
   users: User[];
   bank_accounts: BankAccount[];
@@ -156,6 +177,10 @@ export function App() {
   const [providerEvents, setProviderEvents] = useState<ProviderInboxEvent[]>([]);
   const [ledgerAccounts, setLedgerAccounts] = useState<LedgerAccountBalance[]>([]);
   const [ledgerInvariant, setLedgerInvariant] = useState<LedgerInvariant | null>(null);
+  const [reconciliationRuns, setReconciliationRuns] = useState<ReconciliationRun[]>([]);
+  const [reconciliationExceptions, setReconciliationExceptions] = useState<
+    ReconciliationException[]
+  >([]);
   const [selectedPaymentId, setSelectedPaymentId] = useState<string>("");
   const [authorizationAccepted, setAuthorizationAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -175,16 +200,27 @@ export function App() {
   const refreshAll = useCallback(async () => {
     setError("");
     try {
-      const [nextOverview, nextEvents, nextLedgerAccounts, nextInvariant] = await Promise.all([
+      const [
+        nextOverview,
+        nextEvents,
+        nextLedgerAccounts,
+        nextInvariant,
+        nextRuns,
+        nextExceptions,
+      ] = await Promise.all([
         apiJson<Overview>(`${billpayApiUrl}/dev/overview`),
         apiJson<ProviderInboxEvent[]>(`${billpayApiUrl}/v1/provider-events`),
         apiJson<LedgerAccountBalance[]>(`${billpayApiUrl}/v1/ledger/accounts`),
         apiJson<LedgerInvariant>(`${billpayApiUrl}/v1/ledger/invariants`),
+        apiJson<ReconciliationRun[]>(`${billpayApiUrl}/v1/reconciliation-runs`),
+        apiJson<ReconciliationException[]>(`${billpayApiUrl}/v1/reconciliation-exceptions`),
       ]);
       setOverview(nextOverview);
       setProviderEvents(nextEvents);
       setLedgerAccounts(nextLedgerAccounts);
       setLedgerInvariant(nextInvariant);
+      setReconciliationRuns(nextRuns);
+      setReconciliationExceptions(nextExceptions);
       if (!selectedPaymentId && nextOverview.payment_orders[0]) {
         setSelectedPaymentId(nextOverview.payment_orders[0].id);
       }
@@ -265,6 +301,14 @@ export function App() {
       for (const event of events) {
         await forwardProviderPayload(event.payload);
       }
+    });
+  }
+
+  async function runReconciliation() {
+    await runAction("Reconciliation run completed.", async () => {
+      await apiJson<ReconciliationRun>(`${billpayApiUrl}/v1/reconciliation-runs`, {
+        method: "POST",
+      });
     });
   }
 
@@ -386,6 +430,10 @@ export function App() {
             events={providerEvents}
             ledgerAccounts={ledgerAccounts}
             ledgerInvariant={ledgerInvariant}
+            reconciliationRuns={reconciliationRuns}
+            reconciliationExceptions={reconciliationExceptions}
+            busy={busy}
+            onRunReconciliation={() => void runReconciliation()}
           />
         )}
       </section>
@@ -648,14 +696,51 @@ function Operations({
   events,
   ledgerAccounts,
   ledgerInvariant,
+  reconciliationRuns,
+  reconciliationExceptions,
+  busy,
+  onRunReconciliation,
 }: {
   events: ProviderInboxEvent[];
   ledgerAccounts: LedgerAccountBalance[];
   ledgerInvariant: LedgerInvariant | null;
+  reconciliationRuns: ReconciliationRun[];
+  reconciliationExceptions: ReconciliationException[];
+  busy: boolean;
+  onRunReconciliation: () => void;
 }) {
   const failedEvents = events.filter((event) => !event.processed || event.processing_error);
   return (
     <div className="stack">
+      <section className="panel">
+        <div className="panel-heading">
+          <h2>Reconciliation</h2>
+          <button type="button" className="primary" disabled={busy} onClick={onRunReconciliation}>
+            Run reconciliation
+          </button>
+        </div>
+        <p>
+          {reconciliationRuns[0]
+            ? `${reconciliationRuns[0].exception_count} exception(s) in the latest run.`
+            : "No reconciliation run has been recorded."}
+        </p>
+        {reconciliationExceptions.length === 0 ? (
+          <p>No unresolved reconciliation exceptions.</p>
+        ) : (
+          <div className="item-list">
+            {reconciliationExceptions.map((exception) => (
+              <article key={exception.id} className="list-item">
+                <strong>{exception.exception_type}</strong>
+                <span>{exception.description}</span>
+                <span>
+                  {exception.payment_order_id ?? exception.provider_transfer_id ?? exception.id}
+                </span>
+                <Status value={exception.severity} />
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
       <section className="panel">
         <h2>Ledger invariant</h2>
         <p className={ledgerInvariant?.balanced ? "ok-text" : "error-text"}>

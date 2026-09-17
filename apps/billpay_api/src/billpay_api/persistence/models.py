@@ -179,3 +179,34 @@ class LedgerEntry(Base):
     debit_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     credit_cents: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ReconciliationRun(Base):
+    __tablename__ = "billpay_reconciliation_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    checked_payment_legs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    checked_provider_transfers: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    exception_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class ReconciliationException(Base):
+    __tablename__ = "billpay_reconciliation_exceptions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    reconciliation_run_id: Mapped[str] = mapped_column(
+        ForeignKey("billpay_reconciliation_runs.id"), nullable=False
+    )
+    exception_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    severity: Mapped[str] = mapped_column(String(32), nullable=False)
+    payment_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payment_leg_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_transfer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    details_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

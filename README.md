@@ -2,7 +2,7 @@
 
 Local-only educational application for simulating ACH-like bill-pay flows.
 
-This repository is currently at **Milestone 6: Web UI**. It can
+This repository is currently at **Milestone 7: Reconciliation and hardening**. It can
 create simulated provider customers, tokenize fictional bank accounts, create
 provider transfers, enforce provider idempotency, and move transfers through
 deterministic sandbox states. It can also register webhook endpoints, create
@@ -14,10 +14,12 @@ an inbox without duplicate effects, and start a separate delivery transfer after
 the funding leg succeeds. It also posts immutable balanced ledger transactions
 for successful funding and delivery events. The browser UI can drive the seeded
 happy path, inspect payment details, run sandbox state changes, and show ledger
-and provider-event status.
+and provider-event status. The bill-pay API can run reconciliation against
+provider transfer truth, ledger truth, and payment-leg state, then persist
+unresolved operational exceptions.
 
-It does not move money, connect to real providers, reconcile payments, or provide
-production authentication or real account/biller onboarding.
+It does not move money, connect to real providers, provide production
+authentication, or perform real account/biller onboarding.
 
 ## Safety Boundary
 
@@ -202,7 +204,7 @@ curl -sS -X POST "$BILLPAY/v1/payment-orders" \
   }'
 ```
 
-Milestone 6 bill-pay endpoints:
+Milestone 7 bill-pay endpoints:
 
 - `POST /dev/seed`
 - `GET /dev/overview`
@@ -212,6 +214,9 @@ Milestone 6 bill-pay endpoints:
 - `GET /v1/provider-events`
 - `GET /v1/ledger/accounts`
 - `GET /v1/ledger/invariants`
+- `POST /v1/reconciliation-runs`
+- `GET /v1/reconciliation-runs`
+- `GET /v1/reconciliation-exceptions`
 
 `POST /v1/provider-events` records provider events in an inbox and updates the
 matching payment leg. A funding success starts exactly one delivery transfer
@@ -222,9 +227,10 @@ outcome, even if the provider sends a retried success event.
 
 The web UI on `http://127.0.0.1:3500` includes dashboard, bank-account, biller,
 bill, pay-bill, payment-detail, sandbox-control, and operations views for the
-seeded fictional scenario.
+seeded fictional scenario. The operations view can run reconciliation and show
+unresolved reconciliation exceptions.
 
-## Milestone 6 Acceptance
+## Milestone 7 Acceptance
 
 - Both APIs boot on local ports and expose `/healthz`.
 - The frontend boots on port `3500`.
@@ -257,7 +263,10 @@ seeded fictional scenario.
 - The browser can seed data, submit the seeded bill payment, advance the funding leg, advance the delivery leg, and inspect the delivered payment.
 - Payment detail shows order status, both legs, provider events, and ledger entries.
 - Sandbox controls expose advance, fail, return, duplicate-event, and out-of-order simulations for visible payment legs.
-- Operations shows provider event processing failures and ledger balance status.
+- Operations shows provider event processing failures, ledger balance status, and unresolved reconciliation exceptions.
+- Reconciliation runs compare internal payment legs with provider transfers.
+- Reconciliation detects internal legs missing provider transfers, provider transfers missing internal legs, status mismatches, amount mismatches, missing ledger postings, duplicate ledger postings, unbalanced ledger transactions, and returned funding after completed delivery.
+- Reconciliation runs and exceptions are persisted.
 - Illegal transfer state transitions return `409`.
 - Lint and tests pass.
 - No service uses port `8080`.

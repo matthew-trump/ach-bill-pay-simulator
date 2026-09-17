@@ -3,8 +3,10 @@ from decimal import Decimal
 from pathlib import Path
 
 from billpay_api.main import create_app
-from billpay_api.providers.types import TransferResult, TransferStatus
+from billpay_api.persistence.models import PaymentLeg
+from billpay_api.providers.types import ProviderTransfer, TransferResult, TransferStatus
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 
 @dataclass
@@ -19,6 +21,7 @@ class TransferCall:
 class FakeAchProvider:
     def __init__(self) -> None:
         self.calls: list[TransferCall] = []
+        self.transfers: dict[str, ProviderTransfer] = {}
         self.next_id = 1
 
     async def create_transfer(
@@ -41,9 +44,49 @@ class FakeAchProvider:
         )
         transfer_id = f"tr_fake_{metadata['leg']}_{self.next_id:03d}"
         self.next_id += 1
+        self.transfers[transfer_id] = ProviderTransfer(
+            provider_transfer_id=transfer_id,
+            source_account_id=source_account_id,
+            destination_account_id=destination_account_id,
+            amount=amount,
+            status=TransferStatus.CREATED,
+            metadata=metadata,
+        )
         return TransferResult(
             provider_transfer_id=transfer_id,
             status=TransferStatus.CREATED,
+        )
+
+    async def list_transfers(self) -> list[ProviderTransfer]:
+        return list(self.transfers.values())
+
+    def set_transfer_status(
+        self,
+        transfer_id: str,
+        status: str,
+        return_code: str | None = None,
+    ) -> None:
+        transfer = self.transfers[transfer_id]
+        self.transfers[transfer_id] = ProviderTransfer(
+            provider_transfer_id=transfer.provider_transfer_id,
+            source_account_id=transfer.source_account_id,
+            destination_account_id=transfer.destination_account_id,
+            amount=transfer.amount,
+            status=TransferStatus(status),
+            metadata=transfer.metadata,
+            return_code=return_code,
+        )
+
+    def set_transfer_amount(self, transfer_id: str, amount: str) -> None:
+        transfer = self.transfers[transfer_id]
+        self.transfers[transfer_id] = ProviderTransfer(
+            provider_transfer_id=transfer.provider_transfer_id,
+            source_account_id=transfer.source_account_id,
+            destination_account_id=transfer.destination_account_id,
+            amount=Decimal(amount),
+            status=transfer.status,
+            metadata=transfer.metadata,
+            return_code=transfer.return_code,
         )
 
 
@@ -375,6 +418,145 @@ def test_late_funding_return_after_delivery_marks_action_required(tmp_path: Path
         assert final_order["legs"][0]["status"] == "returned"
         assert final_order["legs"][0]["return_code"] == "R01"
         assert final_order["legs"][1]["status"] == "succeeded"
+
+
+def test_reconciliation_has_no_exceptions_for_clean_delivered_payment(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        final_order = complete_seed_payment(client, provider, seed, "pay-recon-clean")
+
+        run = client.post("/v1/reconciliation-runs")
+        exceptions = client.get("/v1/reconciliation-exceptions")
+
+        assert run.status_code == 200
+        assert run.json()["checked_payment_legs"] == 2
+        assert run.json()["checked_provider_transfers"] == 2
+        assert run.json()["exception_count"] == 0
+        assert exceptions.status_code == 200
+        assert exceptions.json() == []
+        assert final_order["status"] == "delivered"
+
+
+def test_reconciliation_detects_provider_mismatches(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        final_order = complete_seed_payment(client, provider, seed, "pay-recon-mismatch")
+        funding_leg = final_order["legs"][0]
+        delivery_leg = final_order["legs"][1]
+        provider.set_transfer_amount(funding_leg["provider_transfer_id"], "143.67")
+        provider.set_transfer_status(delivery_leg["provider_transfer_id"], "processing")
+        provider.transfers["tr_orphan_001"] = ProviderTransfer(
+            provider_transfer_id="tr_orphan_001",
+            source_account_id="ba_seed_alice_checking",
+            destination_account_id="ba_seed_billpay_settlement",
+            amount=Decimal("10.00"),
+            status=TransferStatus.SUCCEEDED,
+            metadata={"payment_order_id": "external", "leg": "funding"},
+        )
+
+        run = client.post("/v1/reconciliation-runs")
+        exception_types = {
+            exception["exception_type"]
+            for exception in client.get("/v1/reconciliation-exceptions").json()
+        }
+
+        assert run.status_code == 200
+        assert {
+            "amount_mismatch",
+            "status_mismatch",
+            "provider_transfer_missing_internal_leg",
+        }.issubset(exception_types)
+
+
+def test_reconciliation_detects_missing_ledger_posting(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'billpay.sqlite3'}",
+        provider=provider,
+    )
+    with TestClient(app) as client:
+        seed = client.post("/dev/seed").json()
+        order = submit_seed_payment(client, seed, "pay-missing-ledger")
+        transfer_id = order["legs"][0]["provider_transfer_id"]
+        provider.set_transfer_status(transfer_id, "succeeded")
+        sessions = app.state.billpay_db.session()
+        try:
+            session = next(sessions)
+            leg = session.scalars(
+                select(PaymentLeg).where(PaymentLeg.provider_transfer_id == transfer_id)
+            ).one()
+            leg.status = "succeeded"
+            session.commit()
+        finally:
+            sessions.close()
+
+        client.post("/v1/reconciliation-runs")
+        exception_types = {
+            exception["exception_type"]
+            for exception in client.get("/v1/reconciliation-exceptions").json()
+        }
+
+        assert "missing_ledger_posting" in exception_types
+
+
+def test_reconciliation_detects_late_funding_return_after_delivery(tmp_path: Path) -> None:
+    provider = FakeAchProvider()
+    with billpay_client(tmp_path, provider) as client:
+        seed = client.post("/dev/seed").json()
+        delivered = complete_seed_payment(client, provider, seed, "pay-recon-late-return")
+        funding_leg = delivered["legs"][0]
+        provider.set_transfer_status(funding_leg["provider_transfer_id"], "returned", "R01")
+        client.post(
+            "/v1/provider-events",
+            json=provider_event(
+                event_id="evt_recon_late_return",
+                transfer_id=funding_leg["provider_transfer_id"],
+                status="returned",
+                return_code="R01",
+            ),
+        )
+
+        client.post("/v1/reconciliation-runs")
+        exception_types = {
+            exception["exception_type"]
+            for exception in client.get("/v1/reconciliation-exceptions").json()
+        }
+
+        assert "returned_funding_after_completed_delivery" in exception_types
+
+
+def complete_seed_payment(
+    client: TestClient,
+    provider: FakeAchProvider,
+    seed: dict[str, str],
+    idempotency_key: str,
+) -> dict[str, object]:
+    order = submit_seed_payment(client, seed, idempotency_key)
+    funding_transfer_id = order["legs"][0]["provider_transfer_id"]
+    provider.set_transfer_status(funding_transfer_id, "succeeded")
+    client.post(
+        "/v1/provider-events",
+        json=provider_event(
+            event_id=f"evt_{idempotency_key}_funding_succeeded",
+            transfer_id=funding_transfer_id,
+            status="succeeded",
+        ),
+    )
+    with_delivery = submit_seed_payment(client, seed, idempotency_key)
+    delivery_transfer_id = with_delivery["legs"][1]["provider_transfer_id"]
+    provider.set_transfer_status(delivery_transfer_id, "succeeded")
+    client.post(
+        "/v1/provider-events",
+        json=provider_event(
+            event_id=f"evt_{idempotency_key}_delivery_succeeded",
+            transfer_id=delivery_transfer_id,
+            status="succeeded",
+            leg="delivery",
+        ),
+    )
+    return submit_seed_payment(client, seed, idempotency_key)
 
 
 def submit_seed_payment(

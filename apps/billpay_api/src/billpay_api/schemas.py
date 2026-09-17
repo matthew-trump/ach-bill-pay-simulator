@@ -130,3 +130,24 @@ class LedgerAccountBalanceResponse(BaseModel):
 class LedgerInvariantResponse(BaseModel):
     balanced: bool
     unbalanced_transaction_ids: list[str]
+
+
+class ReconciliationRunResponse(BaseModel):
+    id: str
+    status: str
+    checked_payment_legs: int
+    checked_provider_transfers: int
+    exception_count: int
+
+
+class ReconciliationExceptionResponse(BaseModel):
+    id: str
+    reconciliation_run_id: str
+    exception_type: str
+    severity: str
+    payment_order_id: str | None = None
+    payment_leg_id: str | None = None
+    provider_transfer_id: str | None = None
+    description: str
+    details: dict[str, object]
+    status: str

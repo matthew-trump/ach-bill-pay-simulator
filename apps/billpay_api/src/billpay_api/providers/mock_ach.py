@@ -2,7 +2,12 @@ from decimal import Decimal
 
 import httpx
 
-from billpay_api.providers.types import AchProvider, TransferResult, TransferStatus
+from billpay_api.providers.types import (
+    AchProvider,
+    ProviderTransfer,
+    TransferResult,
+    TransferStatus,
+)
 
 
 class MockAchProviderClient(AchProvider):
@@ -40,3 +45,23 @@ class MockAchProviderClient(AchProvider):
             status=TransferStatus(body["status"]),
             return_code=body.get("return_code"),
         )
+
+    async def list_transfers(self) -> list[ProviderTransfer]:
+        async with httpx.AsyncClient(base_url=self.base_url, timeout=5) as client:
+            response = await client.get(
+                "/v1/transfers",
+                headers={"Authorization": f"Bearer {self.api_key}"},
+            )
+            response.raise_for_status()
+        return [
+            ProviderTransfer(
+                provider_transfer_id=body["id"],
+                source_account_id=body["source"],
+                destination_account_id=body["destination"],
+                amount=Decimal(body["amount"]["value"]),
+                status=TransferStatus(body["status"]),
+                metadata=body["metadata"],
+                return_code=body.get("return_code"),
+            )
+            for body in response.json()
+        ]

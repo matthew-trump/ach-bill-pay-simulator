@@ -15,6 +15,8 @@ from billpay_api.persistence.models import (
     PaymentLeg,
     PaymentOrder,
     ProviderEventInbox,
+    ReconciliationException,
+    ReconciliationRun,
     User,
 )
 from billpay_api.providers.mock_ach import MockAchProviderClient
@@ -31,6 +33,8 @@ from billpay_api.schemas import (
     PaymentOrderResponse,
     ProviderEventInboxResponse,
     ProviderEventIngestResponse,
+    ReconciliationExceptionResponse,
+    ReconciliationRunResponse,
     SeedResponse,
     UserResponse,
 )
@@ -43,6 +47,11 @@ from billpay_api.services.payments import (
     create_payment_order,
     ingest_provider_event,
     payment_order_response,
+)
+from billpay_api.services.reconciliation import (
+    list_reconciliation_exceptions,
+    list_reconciliation_runs,
+    run_reconciliation,
 )
 from billpay_api.services.seed import ensure_seed_data
 from billpay_api.settings import settings
@@ -224,7 +233,60 @@ def create_app(
             unbalanced_transaction_ids=unbalanced,
         )
 
+    @app.post("/v1/reconciliation-runs", response_model=ReconciliationRunResponse)
+    async def create_reconciliation_run(
+        session: Session = Depends(get_session),
+        provider: AchProvider = Depends(get_provider),
+    ) -> ReconciliationRunResponse:
+        run = await run_reconciliation(session=session, provider=provider)
+        return _reconciliation_run_response(run)
+
+    @app.get("/v1/reconciliation-runs", response_model=list[ReconciliationRunResponse])
+    def get_reconciliation_runs(
+        session: Session = Depends(get_session),
+    ) -> list[ReconciliationRunResponse]:
+        return [_reconciliation_run_response(run) for run in list_reconciliation_runs(session)]
+
+    @app.get(
+        "/v1/reconciliation-exceptions",
+        response_model=list[ReconciliationExceptionResponse],
+    )
+    def get_reconciliation_exceptions(
+        session: Session = Depends(get_session),
+    ) -> list[ReconciliationExceptionResponse]:
+        return [
+            _reconciliation_exception_response(exception)
+            for exception in list_reconciliation_exceptions(session)
+        ]
+
     return app
+
+
+def _reconciliation_run_response(run: ReconciliationRun) -> ReconciliationRunResponse:
+    return ReconciliationRunResponse(
+        id=run.id,
+        status=run.status,
+        checked_payment_legs=run.checked_payment_legs,
+        checked_provider_transfers=run.checked_provider_transfers,
+        exception_count=run.exception_count,
+    )
+
+
+def _reconciliation_exception_response(
+    exception: ReconciliationException,
+) -> ReconciliationExceptionResponse:
+    return ReconciliationExceptionResponse(
+        id=exception.id,
+        reconciliation_run_id=exception.reconciliation_run_id,
+        exception_type=exception.exception_type,
+        severity=exception.severity,
+        payment_order_id=exception.payment_order_id,
+        payment_leg_id=exception.payment_leg_id,
+        provider_transfer_id=exception.provider_transfer_id,
+        description=exception.description,
+        details=exception.details_json,
+        status=exception.status,
+    )
 
 
 def _provider_event_response(

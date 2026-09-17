@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from time import monotonic, sleep
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
@@ -143,8 +144,15 @@ def receiver_server(received: list[dict[str, object]]) -> Iterator[Receiver]:
 
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
-    while not server.started:
-        pass
+    deadline = monotonic() + 5
+    while not server.started and thread.is_alive() and monotonic() < deadline:
+        sleep(0.01)
+    if not server.started:
+        server.should_exit = True
+        thread.join(timeout=5)
+        raise RuntimeError(
+            "webhook receiver server did not start; local loopback port binding may be blocked"
+        )
     sockets = server.servers[0].sockets
     port = sockets[0].getsockname()[1]
     receiver.url = f"http://127.0.0.1:{port}/webhooks/provider"

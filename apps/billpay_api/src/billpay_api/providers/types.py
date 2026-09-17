@@ -30,6 +30,17 @@ class TransferResult:
     return_code: str | None = None
 
 
+@dataclass(frozen=True)
+class ProviderTransfer:
+    provider_transfer_id: str
+    source_account_id: str
+    destination_account_id: str
+    amount: Decimal
+    status: TransferStatus
+    metadata: dict[str, str]
+    return_code: str | None = None
+
+
 class AchProvider(Protocol):
     async def create_transfer(
         self,
@@ -40,3 +51,5 @@ class AchProvider(Protocol):
         idempotency_key: str,
         metadata: dict[str, str],
     ) -> TransferResult: ...
+
+    async def list_transfers(self) -> list[ProviderTransfer]: ...

@@ -237,3 +237,41 @@ Milestone 6 adds a functional browser UI for the seeded fictional workflow.
   In short: the happy path can now be completed from the browser for seeded
   fictional data, and failure/return states are visible without inspecting the
   database.
+
+== Milestone 7 ==
+
+Milestone 7 adds reconciliation runs and persisted operational exceptions.
+
+  New capabilities:
+
+  - Run reconciliation:
+      - POST /v1/reconciliation-runs
+  - Inspect reconciliation runs:
+      - GET /v1/reconciliation-runs
+  - Inspect unresolved reconciliation exceptions:
+      - GET /v1/reconciliation-exceptions
+  - Compare bill-pay payment legs with mock-provider transfers.
+  - Compare internal ledger postings with successful funding and delivery legs.
+  - Detect:
+      - internal leg missing a provider transfer
+      - provider transfer missing an internal leg
+      - status mismatch
+      - amount mismatch
+      - missing ledger posting
+      - duplicate ledger posting
+      - unbalanced ledger transaction
+      - returned funding after completed delivery
+  - Persist reconciliation runs and open exceptions.
+  - Run reconciliation from the Operations browser view and review unresolved
+    exceptions there.
+
+  Still not included:
+
+  - no production authentication
+  - no real account or biller onboarding
+  - no workflow for marking reconciliation exceptions resolved
+  - no external observability pipeline
+
+  In short: provider truth, bill-pay application state, and ledger truth can now
+  be compared by a repeatable reconciliation run, with discrepancies stored for
+  operational review.

@@ -283,3 +283,9 @@ packages/
 docs/
 docker/
 ```
+
+## Post-MVP Backlog
+
+The completed local MVP intentionally leaves productionization and expanded
+product scope out of bounds. Deferred items are tracked in
+[docs/post-mvp-backlog.md](docs/post-mvp-backlog.md).
